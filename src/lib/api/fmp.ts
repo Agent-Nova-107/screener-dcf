@@ -1,4 +1,4 @@
-const BASE_URL = "https://financialmodelingprep.com/api/v3";
+const BASE_URL = "https://financialmodelingprep.com/stable";
 
 function apiKey(): string {
   return process.env.FMP_API_KEY ?? "";
@@ -11,7 +11,8 @@ function isConfigured(): boolean {
 async function fmpFetch<T>(path: string, revalidate = 86400): Promise<T | null> {
   if (!isConfigured()) return null;
 
-  const url = `${BASE_URL}${path}${path.includes("?") ? "&" : "?"}apikey=${apiKey()}`;
+  const separator = path.includes("?") ? "&" : "?";
+  const url = `${BASE_URL}${path}${separator}apikey=${apiKey()}`;
 
   try {
     const res = await fetch(url, { next: { revalidate } });
@@ -26,7 +27,7 @@ async function fmpFetch<T>(path: string, revalidate = 86400): Promise<T | null> 
   }
 }
 
-// ─── Types brutes FMP ────────────────────────────────────────────────────────
+// ─── Types brutes FMP (stable API) ──────────────────────────────────────────
 
 export interface FMPProfile {
   symbol: string;
@@ -39,12 +40,13 @@ export interface FMPProfile {
   industry: string;
   description: string;
   image: string;
-  lastDiv: number;
+  lastDividend: number;
+  marketCap: number;
 }
 
 export interface FMPIncomeStatement {
   date: string;
-  calendarYear: string;
+  fiscalYear: string;
   period: string;
   revenue: number;
   costOfRevenue: number;
@@ -67,7 +69,7 @@ export interface FMPIncomeStatement {
 
 export interface FMPBalanceSheet {
   date: string;
-  calendarYear: string;
+  fiscalYear: string;
   period: string;
   cashAndCashEquivalents: number;
   totalCurrentAssets: number;
@@ -78,32 +80,17 @@ export interface FMPBalanceSheet {
   totalLiabilities: number;
   totalStockholdersEquity: number;
   totalEquity: number;
-  totalInvestments: number;
-  capitalLeaseObligations: number;
 }
 
 export interface FMPCashFlow {
   date: string;
-  calendarYear: string;
+  fiscalYear: string;
   period: string;
   operatingCashFlow: number;
   capitalExpenditure: number;
   freeCashFlow: number;
   dividendsPaid: number;
   commonStockRepurchased: number;
-}
-
-export interface FMPKeyMetrics {
-  date: string;
-  period: string;
-  revenuePerShare: number;
-  peRatio: number;
-  enterpriseValueOverEBITDA: number;
-  pfcfRatio: number;
-  roic: number;
-  roe: number;
-  debtToEquity: number;
-  currentRatio: number;
 }
 
 export interface FMPHistoricalPrice {
@@ -119,14 +106,14 @@ export interface FMPSearchResult {
   symbol: string;
   name: string;
   currency: string;
-  stockExchange: string;
-  exchangeShortName: string;
+  exchange: string;
+  exchangeFullName: string;
 }
 
 // ─── Endpoints ───────────────────────────────────────────────────────────────
 
 export async function getProfile(symbol: string): Promise<FMPProfile | null> {
-  const data = await fmpFetch<FMPProfile[]>(`/profile/${symbol}`);
+  const data = await fmpFetch<FMPProfile[]>(`/profile?symbol=${symbol}`);
   return data?.[0] ?? null;
 }
 
@@ -136,7 +123,7 @@ export async function getIncomeStatements(
   limit = 5
 ): Promise<FMPIncomeStatement[] | null> {
   return fmpFetch<FMPIncomeStatement[]>(
-    `/income-statement/${symbol}?period=${period}&limit=${limit}`
+    `/income-statement?symbol=${symbol}&period=${period}&limit=${limit}`
   );
 }
 
@@ -146,7 +133,7 @@ export async function getBalanceSheets(
   limit = 5
 ): Promise<FMPBalanceSheet[] | null> {
   return fmpFetch<FMPBalanceSheet[]>(
-    `/balance-sheet-statement/${symbol}?period=${period}&limit=${limit}`
+    `/balance-sheet-statement?symbol=${symbol}&period=${period}&limit=${limit}`
   );
 }
 
@@ -156,27 +143,16 @@ export async function getCashFlowStatements(
   limit = 5
 ): Promise<FMPCashFlow[] | null> {
   return fmpFetch<FMPCashFlow[]>(
-    `/cash-flow-statement/${symbol}?period=${period}&limit=${limit}`
-  );
-}
-
-export async function getKeyMetrics(
-  symbol: string,
-  period: "annual" | "quarter" = "annual",
-  limit = 5
-): Promise<FMPKeyMetrics[] | null> {
-  return fmpFetch<FMPKeyMetrics[]>(
-    `/key-metrics/${symbol}?period=${period}&limit=${limit}`
+    `/cash-flow-statement?symbol=${symbol}&period=${period}&limit=${limit}`
   );
 }
 
 export async function getHistoricalPrices(
   symbol: string
 ): Promise<FMPHistoricalPrice[] | null> {
-  const data = await fmpFetch<{ historical: FMPHistoricalPrice[] }>(
-    `/historical-price-full/${symbol}?serietype=line`
+  return fmpFetch<FMPHistoricalPrice[]>(
+    `/historical-price-eod/full?symbol=${symbol}`
   );
-  return data?.historical ?? null;
 }
 
 export async function searchCompanies(
@@ -184,7 +160,7 @@ export async function searchCompanies(
   limit = 10
 ): Promise<FMPSearchResult[] | null> {
   return fmpFetch<FMPSearchResult[]>(
-    `/search?query=${encodeURIComponent(query)}&limit=${limit}`,
+    `/search-symbol?query=${encodeURIComponent(query)}&limit=${limit}`,
     3600
   );
 }

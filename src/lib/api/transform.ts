@@ -14,7 +14,6 @@ import type {
   FMPIncomeStatement,
   FMPBalanceSheet,
   FMPCashFlow,
-  FMPKeyMetrics,
   FMPHistoricalPrice,
 } from "./fmp";
 import type { YahooHistoricalRow } from "./yahoo";
@@ -62,9 +61,8 @@ const SECTOR_MULTIPLES: Record<string, SectorData> = {
 // ─── Transformers ────────────────────────────────────────────────────────────
 
 export function transformIncomeStatement(raw: FMPIncomeStatement): IncomeStatement {
-  const revenue = raw.revenue || 1;
   return {
-    year: parseInt(raw.calendarYear) || new Date(raw.date).getFullYear(),
+    year: parseInt(raw.fiscalYear) || new Date(raw.date).getFullYear(),
     revenue: raw.revenue,
     costOfRevenue: raw.costOfRevenue,
     grossProfit: raw.grossProfit,
@@ -87,7 +85,7 @@ export function transformBalanceSheet(raw: FMPBalanceSheet): BalanceSheet {
   const investedCapital = raw.totalStockholdersEquity + totalDebt - raw.cashAndCashEquivalents;
 
   return {
-    year: parseInt(raw.calendarYear) || new Date(raw.date).getFullYear(),
+    year: parseInt(raw.fiscalYear) || new Date(raw.date).getFullYear(),
     cashAndEquivalents: raw.cashAndCashEquivalents,
     currentAssets: raw.totalCurrentAssets,
     totalAssets: raw.totalAssets,
@@ -102,7 +100,7 @@ export function transformBalanceSheet(raw: FMPBalanceSheet): BalanceSheet {
 
 export function transformCashFlow(raw: FMPCashFlow): CashFlowStatement {
   return {
-    year: parseInt(raw.calendarYear) || new Date(raw.date).getFullYear(),
+    year: parseInt(raw.fiscalYear) || new Date(raw.date).getFullYear(),
     operatingCashFlow: raw.operatingCashFlow,
     capitalExpenditures: raw.capitalExpenditure,
     freeCashFlow: raw.freeCashFlow,
@@ -144,7 +142,6 @@ export function assembleCompanyAsset(
   balanceSheets: FMPBalanceSheet[],
   cashFlows: FMPCashFlow[],
   priceHistory: PricePoint[],
-  metrics?: FMPKeyMetrics[] | null,
 ): CompanyAsset {
   const sortedIS = [...incomeStmts].reverse();
   const sortedBS = [...balanceSheets].reverse();
@@ -171,8 +168,8 @@ export function assembleCompanyAsset(
     beta: profile.beta || 1,
     effectiveTaxRate: Math.max(Math.min(effectiveTax, 0.5), 0),
     costOfDebt,
-    dividendYield: profile.lastDiv && profile.price > 0 ? profile.lastDiv / profile.price : 0,
-    marketCap: profile.mktCap || profile.price * sharesOut,
+    dividendYield: profile.lastDividend && profile.price > 0 ? profile.lastDividend / profile.price : 0,
+    marketCap: profile.marketCap || profile.mktCap || profile.price * sharesOut,
   };
 
   return {

@@ -150,7 +150,7 @@ export async function searchTickers(query: string): Promise<SearchResult[]> {
         results.push({
           ticker: r.symbol,
           name: r.name,
-          exchange: r.exchangeShortName,
+          exchange: r.exchange,
           type: "Equity",
           source: "fmp",
         });
