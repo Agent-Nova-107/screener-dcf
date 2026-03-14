@@ -7,16 +7,28 @@ import { useAppStore } from "@/store";
 import { signalToColor, signalToLabel } from "@/types";
 import { formatPercent } from "@/lib/valuationEngine";
 import { COMPANY_LIST } from "@/lib/mockData";
+import { useHydration } from "@/hooks/useHydration";
 
 type SortKey = "ticker" | "safetyMargin";
 
 export function WatchlistTable() {
+  const hydrated = useHydration();
   const watchlist = useAppStore((s) => s.watchlist);
   const removeFromWatchlist = useAppStore((s) => s.removeFromWatchlist);
   const addToWatchlist = useAppStore((s) => s.addToWatchlist);
   const isInWatchlist = useAppStore((s) => s.isInWatchlist);
   const [sortKey, setSortKey] = useState<SortKey>("safetyMargin");
   const [sortDesc, setSortDesc] = useState(true);
+
+  if (!hydrated) {
+    return (
+      <div className="card p-8 text-center">
+        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+          Chargement…
+        </p>
+      </div>
+    );
+  }
 
   const sorted = [...watchlist].sort((a, b) => {
     if (sortKey === "safetyMargin") {

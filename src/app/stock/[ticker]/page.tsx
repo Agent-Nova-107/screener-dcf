@@ -16,6 +16,7 @@ import { SensitivityMatrix } from "@/components/stock/SensitivityMatrix";
 import { MetricAnalyzerPanel } from "@/components/stock/MetricAnalyzer";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { FinancialBars } from "@/components/charts/FinancialBars";
+import { useHydration } from "@/hooks/useHydration";
 
 export default function StockPage({
   params: paramsPromise,
@@ -25,6 +26,7 @@ export default function StockPage({
   const { ticker } = use(paramsPromise);
   const upperTicker = ticker.toUpperCase();
   const asset = COMPANIES[upperTicker];
+  const hydrated = useHydration();
 
   if (!asset) {
     notFound();
@@ -34,7 +36,7 @@ export default function StockPage({
   const storeMoat = useAppStore((s) => s.getMoatScore(upperTicker));
   const setStoreMoat = useAppStore((s) => s.setMoatScore);
   const addToWatchlist = useAppStore((s) => s.addToWatchlist);
-  const inWatchlist = useAppStore((s) => s.isInWatchlist(upperTicker));
+  const inWatchlist = hydrated ? useAppStore.getState().isInWatchlist(upperTicker) : false;
 
   const [dcfParams, setDcfParams] = useState<DCFParameters>(storeDCFParams);
   const [moat, setMoat] = useState<MoatScore>(storeMoat);
