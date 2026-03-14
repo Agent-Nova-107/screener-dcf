@@ -353,6 +353,46 @@ export function Sidebar() {
           </div>
         </div>
 
+        {/* ── Bouton nouvelle liste (toujours en haut) ── */}
+        <div className="px-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
+          {showNewList ? (
+            <div className="flex items-center gap-1">
+              <input
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") createList();
+                  if (e.key === "Escape") { setShowNewList(false); setNewListName(""); }
+                }}
+                placeholder="Nom de la liste"
+                className="flex-1 text-xs rounded px-2 py-1.5 outline-none"
+                style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                autoFocus
+              />
+              <button onClick={createList} className="p-1.5 rounded cursor-pointer" style={{ background: "var(--accent)", color: "#fff" }}>
+                <Check className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => { setShowNewList(false); setNewListName(""); }} className="p-1.5 rounded cursor-pointer" style={{ color: "var(--text-muted)" }}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                if (!user) { setShowAuth(true); return; }
+                setShowNewList(true);
+              }}
+              className="flex items-center gap-1.5 text-xs cursor-pointer w-full px-2 py-1.5 rounded-lg transition-colors"
+              style={{ color: "var(--accent)", background: "transparent" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Nouvelle liste
+            </button>
+          )}
+        </div>
+
         {/* ── Section listes custom (Supabase) ── */}
         <div className="flex-1 overflow-y-auto">
           {authLoading ? (
@@ -447,46 +487,6 @@ export function Sidebar() {
           )}
         </div>
 
-        {/* ── Footer : nouvelle liste ── */}
-        <div className="px-3 py-2" style={{ borderTop: "1px solid var(--border)" }}>
-          {showNewList ? (
-            <div className="flex items-center gap-1">
-              <input
-                value={newListName}
-                onChange={(e) => setNewListName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") createList();
-                  if (e.key === "Escape") { setShowNewList(false); setNewListName(""); }
-                }}
-                placeholder="Nom de la liste"
-                className="flex-1 text-xs rounded px-2 py-1.5 outline-none"
-                style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                autoFocus
-              />
-              <button onClick={createList} className="p-1.5 rounded cursor-pointer" style={{ background: "var(--accent)", color: "#fff" }}>
-                <Check className="h-3.5 w-3.5" />
-              </button>
-              <button onClick={() => { setShowNewList(false); setNewListName(""); }} className="p-1.5 rounded cursor-pointer" style={{ color: "var(--text-muted)" }}>
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => {
-                if (!user && configured) { setShowAuth(true); return; }
-                if (!configured) return;
-                setShowNewList(true);
-              }}
-              className="flex items-center gap-1.5 text-xs cursor-pointer w-full px-2 py-1.5 rounded-lg transition-colors"
-              style={{ color: "var(--text-muted)" }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Nouvelle liste
-            </button>
-          )}
-        </div>
       </aside>
 
       <AuthModal

@@ -53,7 +53,9 @@ export function Header() {
             </button>
 
             {/* Auth area */}
-            {!configured || loading ? null : !user ? (
+            {loading ? (
+              <div className="h-8 w-8 rounded-full animate-pulse" style={{ background: "var(--bg-tertiary)" }} />
+            ) : !user ? (
               <button
                 onClick={() => setShowAuth(true)}
                 className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer transition-colors"
