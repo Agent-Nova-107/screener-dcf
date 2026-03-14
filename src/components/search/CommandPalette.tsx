@@ -2,26 +2,78 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Plus, ArrowRight } from "lucide-react";
+import { Search, Plus, ArrowRight, Loader2 } from "lucide-react";
 import { COMPANY_LIST } from "@/lib/mockData";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useAppStore } from "@/store";
 
+interface SearchResult {
+  ticker: string;
+  name: string;
+  exchange: string;
+  type: string;
+  source: "fmp" | "yahoo" | "mock";
+}
+
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const debouncedQuery = useDebounce(query, 150);
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const debouncedQuery = useDebounce(query, 250);
   const router = useRouter();
   const addToWatchlist = useAppStore((s) => s.addToWatchlist);
   const isInWatchlist = useAppStore((s) => s.isInWatchlist);
 
-  const results = debouncedQuery.trim()
-    ? COMPANY_LIST.filter(
-        (c) =>
-          c.ticker.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
-          c.name.toLowerCase().includes(debouncedQuery.toLowerCase())
-      )
-    : COMPANY_LIST;
+  useEffect(() => {
+    if (!debouncedQuery.trim()) {
+      setResults(
+        COMPANY_LIST.map((c) => ({
+          ticker: c.ticker,
+          name: c.name,
+          exchange: "MOCK",
+          type: "Equity",
+          source: "mock" as const,
+        }))
+      );
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
+    fetch(`/api/search?q=${encodeURIComponent(debouncedQuery)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) {
+          setResults(data.results ?? []);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResults(
+            COMPANY_LIST.filter(
+              (c) =>
+                c.ticker.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+                c.name.toLowerCase().includes(debouncedQuery.toLowerCase())
+            ).map((c) => ({
+              ticker: c.ticker,
+              name: c.name,
+              exchange: "MOCK",
+              type: "Equity",
+              source: "mock" as const,
+            }))
+          );
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQuery]);
 
   const handleOpen = useCallback(() => {
     setOpen(true);
@@ -54,10 +106,7 @@ export function CommandPalette() {
       className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
       onClick={() => setOpen(false)}
     >
-      <div
-        className="absolute inset-0"
-        style={{ background: "rgba(0,0,0,0.6)" }}
-      />
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.6)" }} />
       <div
         className="relative w-full max-w-lg rounded-xl shadow-2xl overflow-hidden"
         style={{
@@ -70,12 +119,16 @@ export function CommandPalette() {
           className="flex items-center gap-3 px-4 py-3 border-b"
           style={{ borderColor: "var(--border)" }}
         >
-          <Search className="h-5 w-5 shrink-0" style={{ color: "var(--text-muted)" }} />
+          {loading ? (
+            <Loader2 className="h-5 w-5 shrink-0 animate-spin" style={{ color: "var(--accent)" }} />
+          ) : (
+            <Search className="h-5 w-5 shrink-0" style={{ color: "var(--text-muted)" }} />
+          )}
           <input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Rechercher un ticker ou nom d'entreprise…"
+            placeholder="Rechercher un ticker (ex: AAPL, MSFT, NVDA…)"
             className="flex-1 bg-transparent text-sm outline-none"
             style={{ color: "var(--text-primary)" }}
           />
@@ -91,12 +144,9 @@ export function CommandPalette() {
           </kbd>
         </div>
 
-        <div className="max-h-72 overflow-y-auto py-2">
-          {results.length === 0 ? (
-            <p
-              className="px-4 py-6 text-center text-sm"
-              style={{ color: "var(--text-muted)" }}
-            >
+        <div className="max-h-80 overflow-y-auto py-2">
+          {results.length === 0 && !loading ? (
+            <p className="px-4 py-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
               Aucun résultat pour &ldquo;{debouncedQuery}&rdquo;
             </p>
           ) : (
@@ -104,40 +154,41 @@ export function CommandPalette() {
               const inWL = isInWatchlist(c.ticker);
               return (
                 <div
-                  key={c.ticker}
+                  key={`${c.ticker}-${c.source}`}
                   className="flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors"
                   style={{ color: "var(--text-primary)" }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "var(--bg-hover)")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "transparent")
-                  }
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   <div
-                    className="flex-1"
+                    className="flex-1 min-w-0"
                     onClick={() => {
                       router.push(`/stock/${c.ticker}`);
                       setOpen(false);
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="font-mono font-semibold text-sm">
-                        {c.ticker}
-                      </span>
-                      <span
-                        className="text-sm"
-                        style={{ color: "var(--text-secondary)" }}
-                      >
+                      <span className="font-mono font-semibold text-sm">{c.ticker}</span>
+                      <span className="text-sm truncate" style={{ color: "var(--text-secondary)" }}>
                         {c.name}
                       </span>
                     </div>
-                    <span
-                      className="text-xs"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      {c.sector} — {c.industry}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        {c.exchange}
+                      </span>
+                      {c.source !== "mock" && (
+                        <span
+                          className="text-xs px-1 rounded"
+                          style={{
+                            background: "var(--bg-tertiary)",
+                            color: c.source === "fmp" ? "var(--emerald)" : "var(--amber)",
+                          }}
+                        >
+                          {c.source.toUpperCase()}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-1 ml-2">
@@ -149,12 +200,8 @@ export function CommandPalette() {
                         }}
                         className="rounded p-1.5 transition-colors cursor-pointer"
                         style={{ color: "var(--text-muted)" }}
-                        onMouseEnter={(e) =>
-                          (e.currentTarget.style.color = "var(--emerald)")
-                        }
-                        onMouseLeave={(e) =>
-                          (e.currentTarget.style.color = "var(--text-muted)")
-                        }
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--emerald)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
                         title="Ajouter à la watchlist"
                       >
                         <Plus className="h-4 w-4" />
@@ -167,12 +214,8 @@ export function CommandPalette() {
                       }}
                       className="rounded p-1.5 transition-colors cursor-pointer"
                       style={{ color: "var(--text-muted)" }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.color = "var(--accent)")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.color = "var(--text-muted)")
-                      }
+                      onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
                       title="Voir la fiche"
                     >
                       <ArrowRight className="h-4 w-4" />

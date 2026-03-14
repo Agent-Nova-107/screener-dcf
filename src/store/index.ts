@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { WatchlistEntry, MoatScore, DCFParameters } from "@/types";
+import type { WatchlistEntry, MoatScore, DCFParameters, CompanyAsset } from "@/types";
 import { COMPANIES } from "@/lib/mockData";
 import { computeFullValuation } from "@/lib/valuationEngine";
 
@@ -8,13 +8,17 @@ interface AppState {
   watchlist: WatchlistEntry[];
   dcfParams: DCFParameters;
   moatScores: Record<string, MoatScore>;
+  cachedAssets: Record<string, CompanyAsset>;
 
   addToWatchlist: (ticker: string) => void;
+  addToWatchlistWithAsset: (asset: CompanyAsset) => void;
   removeFromWatchlist: (ticker: string) => void;
   isInWatchlist: (ticker: string) => boolean;
   setDCFParams: (params: Partial<DCFParameters>) => void;
   setMoatScore: (ticker: string, moat: MoatScore) => void;
   getMoatScore: (ticker: string) => MoatScore;
+  cacheAsset: (ticker: string, asset: CompanyAsset) => void;
+  getCachedAsset: (ticker: string) => CompanyAsset | undefined;
   refreshWatchlistValuations: () => void;
 }
 
@@ -32,34 +36,70 @@ const DEFAULT_MOAT: MoatScore = {
   management: 3,
 };
 
+function resolveAsset(ticker: string, cached: Record<string, CompanyAsset>): CompanyAsset | null {
+  return cached[ticker] ?? COMPANIES[ticker] ?? null;
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       watchlist: [],
       dcfParams: DEFAULT_DCF_PARAMS,
       moatScores: {},
+      cachedAssets: {},
 
       addToWatchlist: (ticker: string) => {
         const state = get();
         if (state.watchlist.some((w) => w.ticker === ticker)) return;
 
-        const company = COMPANIES[ticker];
-        if (!company) return;
+        const company = resolveAsset(ticker, state.cachedAssets);
+        if (!company) {
+          const entry: WatchlistEntry = {
+            ticker,
+            name: ticker,
+            addedAt: new Date().toISOString(),
+            currentPrice: 0,
+          };
+          set({ watchlist: [...state.watchlist, entry] });
+          return;
+        }
+
+        const hasFundamentals =
+          company.incomeStatements.length > 0 &&
+          company.balanceSheets.length > 0 &&
+          company.cashFlowStatements.length > 0;
 
         const moat = state.moatScores[ticker] ?? DEFAULT_MOAT;
-        const result = computeFullValuation(company, state.dcfParams, moat);
 
-        const entry: WatchlistEntry = {
-          ticker: company.profile.ticker,
-          name: company.profile.name,
-          addedAt: new Date().toISOString(),
-          currentPrice: company.profile.currentPrice,
-          finalFairValue: result.finalFairValue,
-          safetyMargin: result.safetyMargin,
-          signal: result.signal,
-        };
+        let entry: WatchlistEntry;
+        if (hasFundamentals) {
+          const result = computeFullValuation(company, state.dcfParams, moat);
+          entry = {
+            ticker: company.profile.ticker,
+            name: company.profile.name,
+            addedAt: new Date().toISOString(),
+            currentPrice: company.profile.currentPrice,
+            finalFairValue: result.finalFairValue,
+            safetyMargin: result.safetyMargin,
+            signal: result.signal,
+          };
+        } else {
+          entry = {
+            ticker: company.profile.ticker,
+            name: company.profile.name,
+            addedAt: new Date().toISOString(),
+            currentPrice: company.profile.currentPrice,
+          };
+        }
 
         set({ watchlist: [...state.watchlist, entry] });
+      },
+
+      addToWatchlistWithAsset: (asset: CompanyAsset) => {
+        const state = get();
+        const ticker = asset.profile.ticker;
+        set({ cachedAssets: { ...state.cachedAssets, [ticker]: asset } });
+        get().addToWatchlist(ticker);
       },
 
       removeFromWatchlist: (ticker: string) => {
@@ -84,11 +124,26 @@ export const useAppStore = create<AppState>()(
         return get().moatScores[ticker] ?? DEFAULT_MOAT;
       },
 
+      cacheAsset: (ticker: string, asset: CompanyAsset) => {
+        set({ cachedAssets: { ...get().cachedAssets, [ticker]: asset } });
+      },
+
+      getCachedAsset: (ticker: string) => {
+        return get().cachedAssets[ticker];
+      },
+
       refreshWatchlistValuations: () => {
         const state = get();
         const updated = state.watchlist.map((entry) => {
-          const company = COMPANIES[entry.ticker];
+          const company = resolveAsset(entry.ticker, state.cachedAssets);
           if (!company) return entry;
+
+          const hasFundamentals =
+            company.incomeStatements.length > 0 &&
+            company.balanceSheets.length > 0 &&
+            company.cashFlowStatements.length > 0;
+          if (!hasFundamentals) return entry;
+
           const moat = state.moatScores[entry.ticker] ?? DEFAULT_MOAT;
           const result = computeFullValuation(company, state.dcfParams, moat);
           return {
@@ -104,6 +159,12 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "screener-dcf-store",
+      partialize: (state) => ({
+        watchlist: state.watchlist,
+        dcfParams: state.dcfParams,
+        moatScores: state.moatScores,
+        // cachedAssets volontairement exclu du persist (trop volumineux)
+      }),
     }
   )
 );
