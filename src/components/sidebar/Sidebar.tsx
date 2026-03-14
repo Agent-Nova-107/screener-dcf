@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import Link from "next/link";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Trash2,
@@ -9,9 +9,6 @@ import {
   ChevronRight,
   Star,
   FolderPlus,
-  LogIn,
-  LogOut,
-  User,
   Loader2,
   Edit3,
   Check,
@@ -28,6 +25,7 @@ import type { WatchlistRow, WatchlistItemRow } from "@/lib/supabase/watchlists";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export function Sidebar() {
+  const router = useRouter();
   const { user, loading: authLoading, configured, signIn, signUp, signOut } = useAuth();
   const hydrated = useHydration();
   const [showAuth, setShowAuth] = useState(false);
@@ -157,7 +155,7 @@ export function Sidebar() {
     }
   };
 
-  // Draggable item component
+  // Draggable + fully clickable item
   const DraggableItem = ({
     ticker,
     name,
@@ -170,48 +168,53 @@ export function Sidebar() {
     color?: string;
     badge?: string;
     onRemove?: () => void;
-  }) => (
-    <div
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "copy";
-        onDragStart(ticker, name);
-      }}
-      onDragEnd={onDragEnd}
-      className="flex items-center justify-between py-1 px-1 rounded group/item cursor-grab active:cursor-grabbing transition-colors"
-      style={{ marginLeft: 4, marginRight: 4 }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-    >
-      <div className="flex items-center gap-1.5 min-w-0">
-        <GripVertical className="h-3 w-3 shrink-0 opacity-30 group-hover/item:opacity-70" style={{ color: "var(--text-muted)" }} />
-        <Link
-          href={`/stock/${ticker}`}
-          className="text-xs font-mono font-medium hover:underline truncate"
-          style={{ color: "var(--accent)" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {ticker}
-        </Link>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {badge && (
-          <span className="text-xs font-mono" style={{ color: color || "var(--text-muted)" }}>
-            {badge}
+  }) => {
+    const isDragging = { current: false };
+    return (
+      <div
+        draggable
+        onDragStart={(e) => {
+          isDragging.current = true;
+          e.dataTransfer.effectAllowed = "copy";
+          onDragStart(ticker, name);
+        }}
+        onDragEnd={() => { isDragging.current = false; onDragEnd(); }}
+        onClick={() => {
+          if (!isDragging.current) router.push(`/stock/${ticker}`);
+        }}
+        className="flex items-center justify-between py-1.5 px-2 rounded group/item cursor-pointer active:cursor-grabbing transition-colors"
+        style={{ marginLeft: 4, marginRight: 4 }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <GripVertical className="h-3 w-3 shrink-0 opacity-0 group-hover/item:opacity-50 transition-opacity" style={{ color: "var(--text-muted)" }} />
+          <span className="text-xs font-mono font-medium truncate" style={{ color: "var(--accent)" }}>
+            {ticker}
           </span>
-        )}
-        {onRemove && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}
-            className="p-0.5 cursor-pointer opacity-0 group-hover/item:opacity-100 transition-opacity"
-            style={{ color: "var(--red)" }}
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
-        )}
+          <span className="text-xs truncate hidden" style={{ color: "var(--text-muted)" }}>
+            {name}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {badge && (
+            <span className="text-xs font-mono" style={{ color: color || "var(--text-muted)" }}>
+              {badge}
+            </span>
+          )}
+          {onRemove && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(); }}
+              className="p-0.5 cursor-pointer opacity-0 group-hover/item:opacity-100 transition-opacity"
+              style={{ color: "var(--red)" }}
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Droppable list header
   const ListHeader = ({
@@ -352,29 +355,15 @@ export function Sidebar() {
 
         {/* ── Section listes custom (Supabase) ── */}
         <div className="flex-1 overflow-y-auto">
-          {!configured ? (
+          {authLoading ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--text-muted)" }} />
+            </div>
+          ) : !user || !configured ? (
             <div className="px-4 py-4">
               <p className="text-xs text-center leading-relaxed" style={{ color: "var(--text-muted)" }}>
                 Connectez-vous pour créer des listes personnalisées.
               </p>
-            </div>
-          ) : authLoading ? (
-            <div className="flex justify-center py-6">
-              <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--text-muted)" }} />
-            </div>
-          ) : !user ? (
-            <div className="flex flex-col items-center gap-3 px-4 py-6">
-              <p className="text-xs text-center leading-relaxed" style={{ color: "var(--text-muted)" }}>
-                Connectez-vous pour créer des listes personnalisées et glisser-déposer vos actifs.
-              </p>
-              <button
-                onClick={() => setShowAuth(true)}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium cursor-pointer"
-                style={{ background: "var(--accent)", color: "#fff" }}
-              >
-                <LogIn className="h-3.5 w-3.5" />
-                Se connecter
-              </button>
             </div>
           ) : (
             <>
@@ -458,66 +447,44 @@ export function Sidebar() {
           )}
         </div>
 
-        {/* ── Footer : nouvelle liste + auth ── */}
-        <div style={{ borderTop: "1px solid var(--border)" }}>
-          {user && (
-            <div className="px-3 py-2">
-              {showNewList ? (
-                <div className="flex items-center gap-1">
-                  <input
-                    value={newListName}
-                    onChange={(e) => setNewListName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") createList();
-                      if (e.key === "Escape") { setShowNewList(false); setNewListName(""); }
-                    }}
-                    placeholder="Nom de la liste"
-                    className="flex-1 text-xs rounded px-2 py-1.5 outline-none"
-                    style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                    autoFocus
-                  />
-                  <button onClick={createList} className="p-1.5 rounded cursor-pointer" style={{ background: "var(--accent)", color: "#fff" }}>
-                    <Check className="h-3.5 w-3.5" />
-                  </button>
-                  <button onClick={() => { setShowNewList(false); setNewListName(""); }} className="p-1.5 rounded cursor-pointer" style={{ color: "var(--text-muted)" }}>
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowNewList(true)}
-                  className="flex items-center gap-1.5 text-xs cursor-pointer w-full px-2 py-1.5 rounded-lg transition-colors"
-                  style={{ color: "var(--text-muted)" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Nouvelle liste
-                </button>
-              )}
-            </div>
-          )}
-
-          {user && (
-            <div
-              className="flex items-center justify-between px-4 py-2"
-              style={{ borderTop: "1px solid var(--border)" }}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <User className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--accent)" }} />
-                <span className="text-xs truncate" style={{ color: "var(--text-secondary)" }}>
-                  {user.email}
-                </span>
-              </div>
-              <button
-                onClick={signOut}
-                className="p-1 rounded cursor-pointer shrink-0"
-                style={{ color: "var(--text-muted)" }}
-                title="Déconnexion"
-              >
-                <LogOut className="h-3.5 w-3.5" />
+        {/* ── Footer : nouvelle liste ── */}
+        <div className="px-3 py-2" style={{ borderTop: "1px solid var(--border)" }}>
+          {showNewList ? (
+            <div className="flex items-center gap-1">
+              <input
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") createList();
+                  if (e.key === "Escape") { setShowNewList(false); setNewListName(""); }
+                }}
+                placeholder="Nom de la liste"
+                className="flex-1 text-xs rounded px-2 py-1.5 outline-none"
+                style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                autoFocus
+              />
+              <button onClick={createList} className="p-1.5 rounded cursor-pointer" style={{ background: "var(--accent)", color: "#fff" }}>
+                <Check className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => { setShowNewList(false); setNewListName(""); }} className="p-1.5 rounded cursor-pointer" style={{ color: "var(--text-muted)" }}>
+                <X className="h-3.5 w-3.5" />
               </button>
             </div>
+          ) : (
+            <button
+              onClick={() => {
+                if (!user && configured) { setShowAuth(true); return; }
+                if (!configured) return;
+                setShowNewList(true);
+              }}
+              className="flex items-center gap-1.5 text-xs cursor-pointer w-full px-2 py-1.5 rounded-lg transition-colors"
+              style={{ color: "var(--text-muted)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Nouvelle liste
+            </button>
           )}
         </div>
       </aside>

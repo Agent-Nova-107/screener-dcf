@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Trash2, ArrowUpDown, Search } from "lucide-react";
 import { useAppStore } from "@/store";
 import { signalToColor, signalToLabel } from "@/types";
@@ -11,6 +11,7 @@ import { useHydration } from "@/hooks/useHydration";
 type SortKey = "ticker" | "safetyMargin";
 
 export function WatchlistTable() {
+  const router = useRouter();
   const hydrated = useHydration();
   const watchlist = useAppStore((s) => s.watchlist);
   const removeFromWatchlist = useAppStore((s) => s.removeFromWatchlist);
@@ -105,19 +106,19 @@ export function WatchlistTable() {
             return (
               <tr
                 key={entry.ticker}
-                className="transition-colors"
+                className="transition-colors cursor-pointer"
                 style={{ borderBottom: "1px solid var(--border)" }}
+                onClick={() => router.push(`/stock/${entry.ticker}`)}
                 onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
                 <td className="px-4 py-3">
-                  <Link
-                    href={`/stock/${entry.ticker}`}
-                    className="font-mono font-semibold hover:underline"
+                  <span
+                    className="font-mono font-semibold"
                     style={{ color: "var(--accent)" }}
                   >
                     {entry.ticker}
-                  </Link>
+                  </span>
                 </td>
                 <td className="px-4 py-3" style={{ color: "var(--text-primary)" }}>
                   {entry.name}
@@ -144,7 +145,7 @@ export function WatchlistTable() {
                 </td>
                 <td className="px-4 py-3 text-center">
                   <button
-                    onClick={() => removeFromWatchlist(entry.ticker)}
+                    onClick={(e) => { e.stopPropagation(); removeFromWatchlist(entry.ticker); }}
                     className="rounded p-1 transition-colors cursor-pointer"
                     style={{ color: "var(--text-muted)" }}
                     onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
