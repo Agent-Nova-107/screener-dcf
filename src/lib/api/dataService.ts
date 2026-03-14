@@ -14,7 +14,6 @@ import {
   transformFMPPrices,
   transformYahooPrices,
 } from "./transform";
-import { COMPANIES, COMPANY_LIST } from "@/lib/mockData";
 
 // ─── Cache en mémoire (server-side, durée de vie = durée du process) ────────
 
@@ -39,7 +38,7 @@ function setCache(ticker: string, data: CompanyAsset) {
 
 export async function fetchCompanyAsset(
   ticker: string
-): Promise<{ data: CompanyAsset; source: "fmp" | "yahoo-fmp" | "cache" | "mock" }> {
+): Promise<{ data: CompanyAsset; source: "fmp" | "yahoo" | "cache" }> {
   const upper = ticker.toUpperCase();
 
   // 1. Cache mémoire
@@ -59,7 +58,6 @@ export async function fetchCompanyAsset(
       if (profile && incomeStmts?.length && balanceSheets?.length && cashFlows?.length) {
         let priceHistory: PricePoint[] = [];
 
-        // Prix via FMP d'abord, Yahoo en fallback
         const fmpPrices = await getHistoricalPrices(upper);
         if (fmpPrices && fmpPrices.length > 0) {
           priceHistory = transformFMPPrices(fmpPrices);
@@ -70,7 +68,6 @@ export async function fetchCompanyAsset(
           }
         }
 
-        // Mettre à jour le prix temps réel via Yahoo si possible
         const yahooQuote = await getYahooQuote(upper);
         if (yahooQuote?.regularMarketPrice) {
           profile.price = yahooQuote.regularMarketPrice;
@@ -93,14 +90,7 @@ export async function fetchCompanyAsset(
     }
   }
 
-  // 3. Yahoo seul (prix uniquement, pas de fondamentaux complets)
-  // Pas assez pour construire un CompanyAsset complet → fallback mock
-
-  // 4. Mock data
-  const mock = COMPANIES[upper];
-  if (mock) return { data: mock, source: "mock" };
-
-  // 5. Rien → construire un asset minimal via Yahoo si possible
+  // 3. Yahoo seul (prix uniquement, pas de fondamentaux)
   const yahooQuote = await getYahooQuote(upper);
   const yahooPrices = await getYahooHistorical(upper);
 
@@ -110,7 +100,7 @@ export async function fetchCompanyAsset(
         ticker: upper,
         name: yahooQuote.longName || yahooQuote.shortName || upper,
         sector: "Technology",
-        industry: "Unknown",
+        industry: "N/A",
         description: "Données fondamentales indisponibles. Seul le prix de marché est affiché.",
         currency: (yahooQuote.currency as "USD") || "USD",
         currentPrice: yahooQuote.regularMarketPrice,
@@ -129,10 +119,14 @@ export async function fetchCompanyAsset(
       sectorData: { sectorName: "N/A", averagePER: 20, averageEVtoEBITDA: 12, averagePriceToFCF: 16 },
       priceHistory: yahooPrices ? transformYahooPrices(yahooPrices) : [],
     };
-    return { data: minimalAsset, source: "yahoo-fmp" };
+    return { data: minimalAsset, source: "yahoo" };
   }
 
-  throw new Error(`Aucune donnée disponible pour ${upper}`);
+  // 4. Rien → erreur
+  throw new Error(
+    `Impossible de récupérer les données pour « ${upper} ». ` +
+    `Veuillez vérifier que le ticker est correct ou réessayer plus tard.`
+  );
 }
 
 // ─── Recherche ──────────────────────────────────────────────────────────────
@@ -142,47 +136,31 @@ export interface SearchResult {
   name: string;
   exchange: string;
   type: string;
-  source: "fmp" | "yahoo" | "mock";
+  source: "fmp" | "yahoo";
 }
 
 export async function searchTickers(query: string): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
-  const q = query.toLowerCase();
-
-  // Mock data toujours inclus
-  COMPANY_LIST.forEach((c) => {
-    if (c.ticker.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)) {
-      results.push({
-        ticker: c.ticker,
-        name: c.name,
-        exchange: "MOCK",
-        type: "Equity",
-        source: "mock",
-      });
-    }
-  });
 
   // FMP search
   if (isFMPConfigured()) {
-    const fmpResults = await fmpSearch(query, 8);
+    const fmpResults = await fmpSearch(query, 10);
     if (fmpResults) {
       fmpResults.forEach((r) => {
-        if (!results.some((x) => x.ticker === r.symbol)) {
-          results.push({
-            ticker: r.symbol,
-            name: r.name,
-            exchange: r.exchangeShortName,
-            type: "Equity",
-            source: "fmp",
-          });
-        }
+        results.push({
+          ticker: r.symbol,
+          name: r.name,
+          exchange: r.exchangeShortName,
+          type: "Equity",
+          source: "fmp",
+        });
       });
     }
   }
 
-  // Yahoo fallback si FMP ne donne rien de plus
+  // Yahoo fallback/complément
   if (results.length < 5) {
-    const yahooResults = await searchYahoo(query, 8);
+    const yahooResults = await searchYahoo(query, 10);
     yahooResults.forEach((r) => {
       if (!results.some((x) => x.ticker === r.symbol)) {
         results.push({

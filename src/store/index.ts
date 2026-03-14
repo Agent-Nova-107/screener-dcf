@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { WatchlistEntry, MoatScore, DCFParameters, CompanyAsset } from "@/types";
-import { COMPANIES } from "@/lib/mockData";
 import { computeFullValuation } from "@/lib/valuationEngine";
 
 interface AppState {
@@ -36,10 +35,6 @@ const DEFAULT_MOAT: MoatScore = {
   management: 3,
 };
 
-function resolveAsset(ticker: string, cached: Record<string, CompanyAsset>): CompanyAsset | null {
-  return cached[ticker] ?? COMPANIES[ticker] ?? null;
-}
-
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -52,7 +47,8 @@ export const useAppStore = create<AppState>()(
         const state = get();
         if (state.watchlist.some((w) => w.ticker === ticker)) return;
 
-        const company = resolveAsset(ticker, state.cachedAssets);
+        const company = state.cachedAssets[ticker];
+
         if (!company) {
           const entry: WatchlistEntry = {
             ticker,
@@ -135,7 +131,7 @@ export const useAppStore = create<AppState>()(
       refreshWatchlistValuations: () => {
         const state = get();
         const updated = state.watchlist.map((entry) => {
-          const company = resolveAsset(entry.ticker, state.cachedAssets);
+          const company = state.cachedAssets[entry.ticker];
           if (!company) return entry;
 
           const hasFundamentals =
@@ -163,7 +159,6 @@ export const useAppStore = create<AppState>()(
         watchlist: state.watchlist,
         dcfParams: state.dcfParams,
         moatScores: state.moatScores,
-        // cachedAssets volontairement exclu du persist (trop volumineux)
       }),
     }
   )

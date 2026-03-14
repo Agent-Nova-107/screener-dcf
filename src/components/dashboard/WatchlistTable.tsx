@@ -2,11 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Trash2, ArrowUpDown, Plus } from "lucide-react";
+import { Trash2, ArrowUpDown, Search } from "lucide-react";
 import { useAppStore } from "@/store";
 import { signalToColor, signalToLabel } from "@/types";
 import { formatPercent } from "@/lib/valuationEngine";
-import { COMPANY_LIST } from "@/lib/mockData";
 import { useHydration } from "@/hooks/useHydration";
 
 type SortKey = "ticker" | "safetyMargin";
@@ -15,8 +14,6 @@ export function WatchlistTable() {
   const hydrated = useHydration();
   const watchlist = useAppStore((s) => s.watchlist);
   const removeFromWatchlist = useAppStore((s) => s.removeFromWatchlist);
-  const addToWatchlist = useAppStore((s) => s.addToWatchlist);
-  const isInWatchlist = useAppStore((s) => s.isInWatchlist);
   const [sortKey, setSortKey] = useState<SortKey>("safetyMargin");
   const [sortDesc, setSortDesc] = useState(true);
 
@@ -51,31 +48,21 @@ export function WatchlistTable() {
 
   if (watchlist.length === 0) {
     return (
-      <div className="card p-8 text-center">
+      <div className="card p-10 text-center">
+        <Search className="h-10 w-10 mx-auto mb-4" style={{ color: "var(--text-muted)", opacity: 0.5 }} />
         <p className="text-lg font-medium mb-2" style={{ color: "var(--text-primary)" }}>
-          Watchlist vide
+          Votre watchlist est vide
         </p>
-        <p className="text-sm mb-6" style={{ color: "var(--text-muted)" }}>
-          Ajoute des actions via <kbd className="font-mono px-1 py-0.5 rounded text-xs" style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}>Ctrl+K</kbd> ou les boutons ci-dessous.
+        <p className="text-sm max-w-md mx-auto" style={{ color: "var(--text-muted)" }}>
+          Utilisez{" "}
+          <kbd
+            className="font-mono px-1.5 py-0.5 rounded text-xs"
+            style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}
+          >
+            Ctrl+K
+          </kbd>{" "}
+          pour rechercher une action par ticker (AAPL, MSFT, TSLA…) et l&apos;ajouter à votre watchlist.
         </p>
-        <div className="flex flex-wrap justify-center gap-3">
-          {COMPANY_LIST.map((c) => (
-            <button
-              key={c.ticker}
-              onClick={() => addToWatchlist(c.ticker)}
-              disabled={isInWatchlist(c.ticker)}
-              className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{
-                background: "var(--bg-tertiary)",
-                border: "1px solid var(--border)",
-                color: "var(--text-primary)",
-              }}
-            >
-              <Plus className="h-4 w-4" />
-              {c.ticker} — {c.name}
-            </button>
-          ))}
-        </div>
       </div>
     );
   }
@@ -136,7 +123,7 @@ export function WatchlistTable() {
                   {entry.name}
                 </td>
                 <td className="px-4 py-3 text-right font-mono" style={{ color: "var(--text-primary)" }}>
-                  ${entry.currentPrice.toFixed(2)}
+                  {entry.currentPrice > 0 ? `$${entry.currentPrice.toFixed(2)}` : "—"}
                 </td>
                 <td className="px-4 py-3 text-right font-mono" style={{ color: "var(--text-primary)" }}>
                   {entry.finalFairValue != null ? `$${entry.finalFairValue.toFixed(2)}` : "—"}
