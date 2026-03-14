@@ -4,7 +4,8 @@ import { use, useState, useMemo, useCallback, useEffect } from "react";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, Check, Loader2, AlertTriangle } from "lucide-react";
-import { computeFullValuation, computeFundamentalRatios } from "@/lib/valuationEngine";
+import { computeFullValuation, computeFundamentalRatios, computeMomentum } from "@/lib/valuationEngine";
+import type { FairValuePoint } from "@/types";
 import { useAppStore } from "@/store";
 import type { CompanyAsset, DCFParameters, MoatScore } from "@/types";
 import { ExecutiveSummary } from "@/components/stock/ExecutiveSummary";
@@ -15,6 +16,7 @@ import { SensitivityMatrix } from "@/components/stock/SensitivityMatrix";
 import { MetricAnalyzerPanel } from "@/components/stock/MetricAnalyzer";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { FinancialBars } from "@/components/charts/FinancialBars";
+import { MomentumPanel } from "@/components/stock/MomentumPanel";
 import { useHydration } from "@/hooks/useHydration";
 
 export default function StockPage({
@@ -89,6 +91,24 @@ export default function StockPage({
     if (!asset || !hasFundamentals) return null;
     return computeFundamentalRatios(asset);
   }, [asset, hasFundamentals]);
+
+  const momentum = useMemo(() => {
+    if (!asset || !hasFundamentals) return null;
+    return computeMomentum(asset);
+  }, [asset, hasFundamentals]);
+
+  const fairValueHistory = useMemo((): FairValuePoint[] => {
+    if (!valuation || !asset || asset.priceHistory.length === 0) return [];
+    const fv = valuation.finalFairValue;
+    if (fv <= 0) return [];
+    const prices = asset.priceHistory;
+    const first = prices[0].time;
+    const last = prices[prices.length - 1].time;
+    return [
+      { time: first, value: fv },
+      { time: last, value: fv },
+    ];
+  }, [valuation, asset]);
 
   if (loading) {
     return (
@@ -193,7 +213,7 @@ export default function StockPage({
       {asset.priceHistory.length > 0 && (
         <PriceChart
           priceHistory={asset.priceHistory}
-          fairValueHistory={asset.fairValueHistory}
+          fairValueHistory={fairValueHistory.length > 0 ? fairValueHistory : asset.fairValueHistory}
         />
       )}
 
@@ -221,6 +241,8 @@ export default function StockPage({
               )}
             </div>
           </div>
+
+          {momentum && <MomentumPanel momentum={momentum} />}
 
           <FinancialBars asset={asset} />
 

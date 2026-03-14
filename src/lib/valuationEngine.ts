@@ -20,8 +20,15 @@ export function cagr(
   endValue: number,
   years: number
 ): number {
-  if (startValue <= 0 || endValue <= 0 || years <= 0) return 0;
+  if (years <= 0) return 0;
+  if (startValue <= 0 && endValue <= 0) return 0;
+  if (startValue <= 0 || endValue <= 0) return 0;
   return Math.pow(endValue / startValue, 1 / years) - 1;
+}
+
+export function yoyGrowth(previous: number, current: number): number {
+  if (previous === 0) return current > 0 ? 1 : current < 0 ? -1 : 0;
+  return (current - previous) / Math.abs(previous);
 }
 
 export function roic(
@@ -112,6 +119,180 @@ export function computeFundamentalRatios(
 
     return ratios;
   });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// A-bis. MOMENTUM — TENDANCES ET SIGNAUX
+// ═════════════════════════════════════════════════════════════════════════════
+
+export interface MomentumEntry {
+  year: number;
+  revenueGrowth: number;
+  opexGrowth: number;
+  grossMargin: number;
+  netMargin: number;
+  fcfGrowth: number;
+  earningsMomentum: number; // revenue growth - opex growth (positive = expanding leverage)
+}
+
+export interface MomentumSignal {
+  label: string;
+  description: string;
+  strength: "strong_positive" | "positive" | "neutral" | "negative" | "strong_negative";
+}
+
+export interface MomentumAnalysis {
+  entries: MomentumEntry[];
+  signals: MomentumSignal[];
+  overallScore: number; // -100 to +100
+}
+
+export function computeMomentum(asset: CompanyAsset): MomentumAnalysis | null {
+  const { incomeStatements: iss, cashFlowStatements: cfs } = asset;
+  if (iss.length < 2) return null;
+
+  const entries: MomentumEntry[] = [];
+  for (let i = 1; i < iss.length; i++) {
+    const prev = iss[i - 1];
+    const curr = iss[i];
+    const prevCf = cfs[i - 1];
+    const currCf = cfs[i];
+
+    const revG = yoyGrowth(prev.revenue, curr.revenue);
+    const opexG = yoyGrowth(prev.operatingExpenses, curr.operatingExpenses);
+    const fcfG = prevCf && currCf ? yoyGrowth(prevCf.freeCashFlow, currCf.freeCashFlow) : 0;
+
+    entries.push({
+      year: curr.year,
+      revenueGrowth: revG,
+      opexGrowth: opexG,
+      grossMargin: curr.grossMargin,
+      netMargin: curr.netMargin,
+      fcfGrowth: fcfG,
+      earningsMomentum: revG - opexG,
+    });
+  }
+
+  const signals: MomentumSignal[] = [];
+  let score = 0;
+
+  // Signal 1: Revenue acceleration
+  if (entries.length >= 2) {
+    const recent = entries.slice(-2);
+    const accelerating = recent[1].revenueGrowth > recent[0].revenueGrowth && recent[1].revenueGrowth > 0;
+    const decelerating = recent[1].revenueGrowth < recent[0].revenueGrowth && recent[1].revenueGrowth > 0;
+    const declining = recent[1].revenueGrowth < 0;
+
+    if (accelerating) {
+      signals.push({
+        label: "Accélération du CA",
+        description: `La croissance du chiffre d'affaires accélère : ${(recent[0].revenueGrowth * 100).toFixed(1)}% → ${(recent[1].revenueGrowth * 100).toFixed(1)}%.`,
+        strength: "strong_positive",
+      });
+      score += 25;
+    } else if (decelerating) {
+      signals.push({
+        label: "Décélération du CA",
+        description: `Le CA croît mais ralentit : ${(recent[0].revenueGrowth * 100).toFixed(1)}% → ${(recent[1].revenueGrowth * 100).toFixed(1)}%.`,
+        strength: "neutral",
+      });
+    } else if (declining) {
+      signals.push({
+        label: "Décroissance du CA",
+        description: `Le chiffre d'affaires recule de ${(Math.abs(recent[1].revenueGrowth) * 100).toFixed(1)}% sur le dernier exercice.`,
+        strength: "strong_negative",
+      });
+      score -= 25;
+    }
+  }
+
+  // Signal 2: Earnings expansion — revenue up, expenses down/stable
+  const lastEntry = entries[entries.length - 1];
+  if (lastEntry.earningsMomentum > 0.05) {
+    signals.push({
+      label: "Levier Opérationnel Positif",
+      description: `Le CA croît plus vite (+${(lastEntry.revenueGrowth * 100).toFixed(1)}%) que les dépenses (+${(lastEntry.opexGrowth * 100).toFixed(1)}%). Signal d'explosion potentielle de la profitabilité.`,
+      strength: lastEntry.earningsMomentum > 0.10 ? "strong_positive" : "positive",
+    });
+    score += lastEntry.earningsMomentum > 0.10 ? 30 : 15;
+  } else if (lastEntry.earningsMomentum < -0.05) {
+    signals.push({
+      label: "Levier Opérationnel Négatif",
+      description: `Les dépenses croissent (+${(lastEntry.opexGrowth * 100).toFixed(1)}%) plus vite que le CA (+${(lastEntry.revenueGrowth * 100).toFixed(1)}%). Compression des marges en cours.`,
+      strength: lastEntry.earningsMomentum < -0.10 ? "strong_negative" : "negative",
+    });
+    score += lastEntry.earningsMomentum < -0.10 ? -30 : -15;
+  }
+
+  // Signal 3: Margin expansion over 3+ years
+  if (entries.length >= 3) {
+    const last3 = entries.slice(-3);
+    const marginExpanding = last3.every((e, i) => i === 0 || e.grossMargin > last3[i - 1].grossMargin);
+    const marginContracting = last3.every((e, i) => i === 0 || e.grossMargin < last3[i - 1].grossMargin);
+
+    if (marginExpanding) {
+      signals.push({
+        label: "Marges Brutes en Expansion",
+        description: `Marge brute en hausse sur 3 exercices consécutifs : ${(last3[0].grossMargin * 100).toFixed(1)}% → ${(last3[2].grossMargin * 100).toFixed(1)}%. Pricing power confirmé.`,
+        strength: "strong_positive",
+      });
+      score += 20;
+    } else if (marginContracting) {
+      signals.push({
+        label: "Marges Brutes en Contraction",
+        description: `Marge brute en baisse sur 3 exercices : ${(last3[0].grossMargin * 100).toFixed(1)}% → ${(last3[2].grossMargin * 100).toFixed(1)}%. Pression sur les coûts ou les prix.`,
+        strength: "negative",
+      });
+      score -= 20;
+    }
+  }
+
+  // Signal 4: FCF momentum
+  if (entries.length >= 2) {
+    const last2 = entries.slice(-2);
+    if (last2[1].fcfGrowth > 0.20) {
+      signals.push({
+        label: "Cash-Flow Libre en Forte Hausse",
+        description: `Le FCF progresse de +${(last2[1].fcfGrowth * 100).toFixed(0)}% sur le dernier exercice. Capacité d'autofinancement renforcée.`,
+        strength: "strong_positive",
+      });
+      score += 20;
+    } else if (last2[1].fcfGrowth < -0.20) {
+      signals.push({
+        label: "Cash-Flow Libre en Forte Baisse",
+        description: `Le FCF recule de ${(Math.abs(last2[1].fcfGrowth) * 100).toFixed(0)}%. Consommation de cash accrue.`,
+        strength: "negative",
+      });
+      score -= 20;
+    }
+  }
+
+  // Signal 5: Net margin trend
+  if (entries.length >= 2) {
+    const last2 = entries.slice(-2);
+    const netMarginDelta = last2[1].netMargin - last2[0].netMargin;
+    if (netMarginDelta > 0.03) {
+      signals.push({
+        label: "Marge Nette en Amélioration",
+        description: `Marge nette en hausse de +${(netMarginDelta * 100).toFixed(1)} pts : ${(last2[0].netMargin * 100).toFixed(1)}% → ${(last2[1].netMargin * 100).toFixed(1)}%.`,
+        strength: "positive",
+      });
+      score += 10;
+    } else if (netMarginDelta < -0.03) {
+      signals.push({
+        label: "Marge Nette en Détérioration",
+        description: `Marge nette en recul de ${(Math.abs(netMarginDelta) * 100).toFixed(1)} pts.`,
+        strength: "negative",
+      });
+      score -= 10;
+    }
+  }
+
+  return {
+    entries,
+    signals,
+    overallScore: Math.max(-100, Math.min(100, score)),
+  };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

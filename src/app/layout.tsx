@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Header } from "@/components/layout/Header";
 import { CommandPalette } from "@/components/search/CommandPalette";
+import { Sidebar } from "@/components/sidebar/Sidebar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,9 +33,14 @@ export default function RootLayout({
       >
         <Header />
         <CommandPalette />
-        <main className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
-          {children}
-        </main>
+        <div className="flex" style={{ height: "calc(100vh - 56px)" }}>
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-[1200px]">
+              {children}
+            </div>
+          </main>
+        </div>
       </body>
     </html>
   );
