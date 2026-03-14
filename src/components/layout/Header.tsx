@@ -23,7 +23,7 @@ export function Header() {
         <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link href="/" className="flex items-center gap-2 font-semibold">
             <BarChart3 className="h-5 w-5" style={{ color: "var(--accent)" }} />
-            <span style={{ color: "var(--text-primary)" }}>True Stocks</span>
+            <span style={{ color: "var(--text-primary)" }}>True Stock Screener</span>
           </Link>
 
           <div className="flex items-center gap-3">

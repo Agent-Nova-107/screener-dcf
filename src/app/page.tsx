@@ -10,7 +10,7 @@ export default function DashboardPage() {
         <BarChart3 className="h-6 w-6" style={{ color: "var(--accent)" }} />
         <div>
           <h1 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
-            True Stocks
+            True Stock Screener
           </h1>
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             Watchlist et signaux de valorisation

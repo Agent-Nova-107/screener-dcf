@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "True Stocks — Analyse & Valorisation Boursière",
+  title: "True Stock Screener — Analyse & Valorisation Boursière",
   description:
     "Plateforme d'analyse fondamentale, screener et modèle DCF pour investisseurs exigeants.",
 };
