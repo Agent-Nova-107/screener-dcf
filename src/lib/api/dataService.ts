@@ -15,7 +15,7 @@ import {
   transformYahooPrices,
 } from "./transform";
 
-// ─── Cache en mémoire (server-side, durée de vie = durée du process) ────────
+// ─── Cache mémoire (server-side) ────────────────────────────────────────────
 
 const assetCache = new Map<string, { data: CompanyAsset; ts: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -38,64 +38,95 @@ function setCache(ticker: string, data: CompanyAsset) {
 
 export async function fetchCompanyAsset(
   ticker: string
-): Promise<{ data: CompanyAsset; source: "fmp" | "yahoo" | "cache" }> {
+): Promise<{ data: CompanyAsset; source: string }> {
   const upper = ticker.toUpperCase();
 
-  // 1. Cache mémoire
   const cached = getCached(upper);
   if (cached) return { data: cached, source: "cache" };
 
-  // 2. FMP (source primaire)
+  let profile = null;
+  let incomeStmts = null;
+  let balanceSheets = null;
+  let cashFlows = null;
+  let priceHistory: PricePoint[] = [];
+
+  // ── FMP ────────────────────────────────────────────────────────────────
   if (isFMPConfigured()) {
-    try {
-      const [profile, incomeStmts, balanceSheets, cashFlows] = await Promise.all([
-        getProfile(upper),
-        getIncomeStatements(upper, "annual", 5),
-        getBalanceSheets(upper, "annual", 5),
-        getCashFlowStatements(upper, "annual", 5),
-      ]);
+    [profile, incomeStmts, balanceSheets, cashFlows] = await Promise.all([
+      getProfile(upper),
+      getIncomeStatements(upper, "annual", 5),
+      getBalanceSheets(upper, "annual", 5),
+      getCashFlowStatements(upper, "annual", 5),
+    ]);
 
-      if (profile && incomeStmts?.length && balanceSheets?.length && cashFlows?.length) {
-        let priceHistory: PricePoint[] = [];
-
-        const fmpPrices = await getHistoricalPrices(upper);
-        if (fmpPrices && fmpPrices.length > 0) {
-          priceHistory = transformFMPPrices(fmpPrices);
-        } else {
-          const yahooPrices = await getYahooHistorical(upper);
-          if (yahooPrices && yahooPrices.length > 0) {
-            priceHistory = transformYahooPrices(yahooPrices);
-          }
-        }
-
-        const yahooQuote = await getYahooQuote(upper);
-        if (yahooQuote?.regularMarketPrice) {
-          profile.price = yahooQuote.regularMarketPrice;
-          if (yahooQuote.marketCap) profile.mktCap = yahooQuote.marketCap;
-        }
-
-        const asset = assembleCompanyAsset(
-          profile,
-          incomeStmts,
-          balanceSheets,
-          cashFlows,
-          priceHistory,
-        );
-
-        setCache(upper, asset);
-        return { data: asset, source: "fmp" };
-      }
-    } catch (err) {
-      console.warn(`[DataService] FMP failed for ${upper}:`, err);
+    const fmpPrices = await getHistoricalPrices(upper);
+    if (fmpPrices && fmpPrices.length > 0) {
+      priceHistory = transformFMPPrices(fmpPrices);
     }
   }
 
-  // 3. Yahoo seul (prix uniquement, pas de fondamentaux)
+  // ── Yahoo complément (prix temps réel + prix historiques fallback) ─────
   const yahooQuote = await getYahooQuote(upper);
-  const yahooPrices = await getYahooHistorical(upper);
 
+  if (priceHistory.length === 0) {
+    const yahooPrices = await getYahooHistorical(upper);
+    if (yahooPrices && yahooPrices.length > 0) {
+      priceHistory = transformYahooPrices(yahooPrices);
+    }
+  }
+
+  // ── CAS 1 : Profil FMP + fondamentaux complets ────────────────────────
+  const hasFundamentals =
+    !!incomeStmts?.length && !!balanceSheets?.length && !!cashFlows?.length;
+
+  if (profile && hasFundamentals) {
+    if (yahooQuote?.regularMarketPrice) {
+      profile.price = yahooQuote.regularMarketPrice;
+      if (yahooQuote.marketCap) profile.marketCap = yahooQuote.marketCap;
+    }
+    const asset = assembleCompanyAsset(
+      profile, incomeStmts!, balanceSheets!, cashFlows!, priceHistory,
+    );
+    setCache(upper, asset);
+    return { data: asset, source: "fmp" };
+  }
+
+  // ── CAS 2 : Profil FMP sans fondamentaux (ticker paywall) ─────────────
+  if (profile) {
+    const price = yahooQuote?.regularMarketPrice ?? profile.price;
+    const asset: CompanyAsset = {
+      profile: {
+        ticker: upper,
+        name: profile.companyName,
+        sector: "Technology",
+        industry: profile.industry || "N/A",
+        description: profile.description?.slice(0, 500) ||
+          "Données fondamentales indisponibles sur le plan gratuit FMP pour ce ticker.",
+        currency: "USD",
+        currentPrice: price,
+        logoUrl: profile.image,
+      },
+      incomeStatements: [],
+      balanceSheets: [],
+      cashFlowStatements: [],
+      currentMetrics: {
+        sharesOutstanding: profile.marketCap && price > 0 ? Math.round(profile.marketCap / price) : 1,
+        beta: profile.beta || 1,
+        effectiveTaxRate: 0.21,
+        costOfDebt: 0.05,
+        dividendYield: 0,
+        marketCap: profile.marketCap || price,
+      },
+      sectorData: { sectorName: profile.sector || "N/A", averagePER: 20, averageEVtoEBITDA: 12, averagePriceToFCF: 16 },
+      priceHistory,
+    };
+    setCache(upper, asset);
+    return { data: asset, source: "fmp-partial" };
+  }
+
+  // ── CAS 3 : Pas de profil FMP, Yahoo uniquement ──────────────────────
   if (yahooQuote?.regularMarketPrice) {
-    const minimalAsset: CompanyAsset = {
+    const asset: CompanyAsset = {
       profile: {
         ticker: upper,
         name: yahooQuote.longName || yahooQuote.shortName || upper,
@@ -117,15 +148,16 @@ export async function fetchCompanyAsset(
         marketCap: yahooQuote.marketCap || yahooQuote.regularMarketPrice,
       },
       sectorData: { sectorName: "N/A", averagePER: 20, averageEVtoEBITDA: 12, averagePriceToFCF: 16 },
-      priceHistory: yahooPrices ? transformYahooPrices(yahooPrices) : [],
+      priceHistory,
     };
-    return { data: minimalAsset, source: "yahoo" };
+    return { data: asset, source: "yahoo" };
   }
 
-  // 4. Rien → erreur
+  // ── CAS 4 : Rien ─────────────────────────────────────────────────────
   throw new Error(
-    `Impossible de récupérer les données pour « ${upper} ». ` +
-    `Veuillez vérifier que le ticker est correct ou réessayer plus tard.`
+    `Nous n'avons pas pu récupérer les données pour « ${upper} ». ` +
+    `Vérifiez que le ticker est correct ou réessayez dans quelques instants. ` +
+    `Nous nous excusons pour la gêne occasionnée.`
   );
 }
 
@@ -142,7 +174,6 @@ export interface SearchResult {
 export async function searchTickers(query: string): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
 
-  // FMP search
   if (isFMPConfigured()) {
     const fmpResults = await fmpSearch(query, 10);
     if (fmpResults) {
@@ -158,7 +189,6 @@ export async function searchTickers(query: string): Promise<SearchResult[]> {
     }
   }
 
-  // Yahoo fallback/complément
   if (results.length < 5) {
     const yahooResults = await searchYahoo(query, 10);
     yahooResults.forEach((r) => {

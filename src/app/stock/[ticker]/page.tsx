@@ -45,6 +45,7 @@ export default function StockPage({
         if (!cancelled) {
           setAsset(json.data);
           setDataSource(json.source);
+          useAppStore.getState().cacheAsset(upperTicker, json.data);
           setLoading(false);
         }
       })
@@ -172,10 +173,16 @@ export default function StockPage({
             >
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span className="text-sm">
-                Données fondamentales indisponibles (clé FMP manquante ou ticker non couvert).
-                Seul le graphique de prix est affiché.
+                Les données fondamentales (compte de résultat, bilan, cash-flow) ne sont pas disponibles
+                pour ce ticker sur le plan FMP gratuit. Le modèle DCF et la valorisation relative ne peuvent
+                pas être calculés. Seuls le prix de marché et le graphique de prix sont affichés.
               </span>
             </div>
+          )}
+          {asset.profile.description && (
+            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              {asset.profile.description}
+            </p>
           )}
         </div>
       )}
