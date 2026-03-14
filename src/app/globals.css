@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0b0e11;
+  --bg-secondary: #131722;
+  --bg-tertiary: #1c2030;
+  --bg-hover: #232738;
+  --border: #2a2e3e;
+  --border-light: #363a4f;
+  --text-primary: #e8eaed;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --emerald: #10b981;
+  --emerald-light: #4ade80;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --gray-signal: #6b7280;
+}
+
+@theme inline {
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) var(--bg-secondary);
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer utilities {
+  .card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+  }
+  .card-hover:hover {
+    border-color: var(--border-light);
+    background: var(--bg-tertiary);
+  }
+}
