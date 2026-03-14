@@ -3,12 +3,20 @@ import { persist } from "zustand/middleware";
 import type { WatchlistEntry, MoatScore, DCFParameters, CompanyAsset } from "@/types";
 import { computeFullValuation } from "@/lib/valuationEngine";
 
+interface SyncConfig {
+  supabase: any;
+  watchlistId: string;
+}
+
 interface AppState {
   watchlist: WatchlistEntry[];
   dcfParams: DCFParameters;
   moatScores: Record<string, MoatScore>;
   cachedAssets: Record<string, CompanyAsset>;
+  _syncConfig: SyncConfig | null;
 
+  setSyncConfig: (config: SyncConfig | null) => void;
+  setWatchlist: (entries: WatchlistEntry[]) => void;
   addToWatchlist: (ticker: string) => void;
   addToWatchlistWithAsset: (asset: CompanyAsset) => void;
   removeFromWatchlist: (ticker: string) => void;
@@ -35,6 +43,30 @@ const DEFAULT_MOAT: MoatScore = {
   management: 3,
 };
 
+function syncAdd(config: SyncConfig, entry: WatchlistEntry) {
+  config.supabase
+    .from("watchlist_items")
+    .insert({
+      watchlist_id: config.watchlistId,
+      ticker: entry.ticker,
+      name: entry.name,
+      current_price: entry.currentPrice || null,
+      fair_value: entry.finalFairValue ?? null,
+      safety_margin: entry.safetyMargin ?? null,
+      signal: entry.signal ?? null,
+    })
+    .then(() => {});
+}
+
+function syncRemove(config: SyncConfig, ticker: string) {
+  config.supabase
+    .from("watchlist_items")
+    .delete()
+    .eq("watchlist_id", config.watchlistId)
+    .eq("ticker", ticker)
+    .then(() => {});
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -42,6 +74,11 @@ export const useAppStore = create<AppState>()(
       dcfParams: DEFAULT_DCF_PARAMS,
       moatScores: {},
       cachedAssets: {},
+      _syncConfig: null,
+
+      setSyncConfig: (config) => set({ _syncConfig: config }),
+
+      setWatchlist: (entries) => set({ watchlist: entries }),
 
       addToWatchlist: (ticker: string) => {
         const state = get();
@@ -49,46 +86,46 @@ export const useAppStore = create<AppState>()(
 
         const company = state.cachedAssets[ticker];
 
+        let entry: WatchlistEntry;
         if (!company) {
-          const entry: WatchlistEntry = {
+          entry = {
             ticker,
             name: ticker,
             addedAt: new Date().toISOString(),
             currentPrice: 0,
           };
-          set({ watchlist: [...state.watchlist, entry] });
-          return;
-        }
-
-        const hasFundamentals =
-          company.incomeStatements.length > 0 &&
-          company.balanceSheets.length > 0 &&
-          company.cashFlowStatements.length > 0;
-
-        const moat = state.moatScores[ticker] ?? DEFAULT_MOAT;
-
-        let entry: WatchlistEntry;
-        if (hasFundamentals) {
-          const result = computeFullValuation(company, state.dcfParams, moat);
-          entry = {
-            ticker: company.profile.ticker,
-            name: company.profile.name,
-            addedAt: new Date().toISOString(),
-            currentPrice: company.profile.currentPrice,
-            finalFairValue: result.finalFairValue,
-            safetyMargin: result.safetyMargin,
-            signal: result.signal,
-          };
         } else {
-          entry = {
-            ticker: company.profile.ticker,
-            name: company.profile.name,
-            addedAt: new Date().toISOString(),
-            currentPrice: company.profile.currentPrice,
-          };
+          const hasFundamentals =
+            company.incomeStatements.length > 0 &&
+            company.balanceSheets.length > 0 &&
+            company.cashFlowStatements.length > 0;
+
+          const moat = state.moatScores[ticker] ?? DEFAULT_MOAT;
+
+          if (hasFundamentals) {
+            const result = computeFullValuation(company, state.dcfParams, moat);
+            entry = {
+              ticker: company.profile.ticker,
+              name: company.profile.name,
+              addedAt: new Date().toISOString(),
+              currentPrice: company.profile.currentPrice,
+              finalFairValue: result.finalFairValue,
+              safetyMargin: result.safetyMargin,
+              signal: result.signal,
+            };
+          } else {
+            entry = {
+              ticker: company.profile.ticker,
+              name: company.profile.name,
+              addedAt: new Date().toISOString(),
+              currentPrice: company.profile.currentPrice,
+            };
+          }
         }
 
         set({ watchlist: [...state.watchlist, entry] });
+
+        if (state._syncConfig) syncAdd(state._syncConfig, entry);
       },
 
       addToWatchlistWithAsset: (asset: CompanyAsset) => {
@@ -99,9 +136,10 @@ export const useAppStore = create<AppState>()(
       },
 
       removeFromWatchlist: (ticker: string) => {
-        set({
-          watchlist: get().watchlist.filter((w) => w.ticker !== ticker),
-        });
+        const state = get();
+        set({ watchlist: state.watchlist.filter((w) => w.ticker !== ticker) });
+
+        if (state._syncConfig) syncRemove(state._syncConfig, ticker);
       },
 
       isInWatchlist: (ticker: string) => {
@@ -156,7 +194,6 @@ export const useAppStore = create<AppState>()(
     {
       name: "screener-dcf-store",
       partialize: (state) => ({
-        watchlist: state.watchlist,
         dcfParams: state.dcfParams,
         moatScores: state.moatScores,
       }),

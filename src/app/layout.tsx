@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Header } from "@/components/layout/Header";
 import { CommandPalette } from "@/components/search/CommandPalette";
 import { Sidebar } from "@/components/sidebar/Sidebar";
+import { WatchlistSyncProvider } from "@/components/providers/WatchlistSyncProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -33,6 +34,7 @@ export default function RootLayout({
       >
         <Header />
         <CommandPalette />
+        <WatchlistSyncProvider />
         <div className="flex" style={{ height: "calc(100vh - 56px)" }}>
           <Sidebar />
           <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">

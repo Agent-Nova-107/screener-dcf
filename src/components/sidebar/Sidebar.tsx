@@ -61,7 +61,7 @@ export function Sidebar() {
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: true });
-    setCustomLists(data ?? []);
+    setCustomLists((data ?? []).filter((w: WatchlistRow) => w.name !== "__default__"));
     setLoading(false);
   }, [user, supabase]);
 
