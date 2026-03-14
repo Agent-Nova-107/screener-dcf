@@ -8,9 +8,15 @@ import {
   isFMPConfigured,
   searchCompanies as fmpSearch,
 } from "./fmp";
-import { getYahooQuote, getYahooHistorical, searchYahoo } from "./yahoo";
+import {
+  getYahooQuote,
+  getYahooHistorical,
+  getYahooFundamentals,
+  searchYahoo,
+} from "./yahoo";
 import {
   assembleCompanyAsset,
+  assembleFromYahoo,
   transformFMPPrices,
   transformYahooPrices,
 } from "./transform";
@@ -50,7 +56,7 @@ export async function fetchCompanyAsset(
   let cashFlows = null;
   let priceHistory: PricePoint[] = [];
 
-  // ── FMP ────────────────────────────────────────────────────────────────
+  // ── Étape 1 : FMP (source prioritaire) ────────────────────────────────
   if (isFMPConfigured()) {
     [profile, incomeStmts, balanceSheets, cashFlows] = await Promise.all([
       getProfile(upper),
@@ -65,7 +71,7 @@ export async function fetchCompanyAsset(
     }
   }
 
-  // ── Yahoo complément (prix temps réel + prix historiques fallback) ─────
+  // ── Étape 2 : Yahoo quote + prix historiques fallback ─────────────────
   const yahooQuote = await getYahooQuote(upper);
 
   if (priceHistory.length === 0) {
@@ -75,11 +81,11 @@ export async function fetchCompanyAsset(
     }
   }
 
-  // ── CAS 1 : Profil FMP + fondamentaux complets ────────────────────────
-  const hasFundamentals =
+  const fmpHasFundamentals =
     !!incomeStmts?.length && !!balanceSheets?.length && !!cashFlows?.length;
 
-  if (profile && hasFundamentals) {
+  // ── CAS 1 : FMP complet (profil + fondamentaux) ───────────────────────
+  if (profile && fmpHasFundamentals) {
     if (yahooQuote?.regularMarketPrice) {
       profile.price = yahooQuote.regularMarketPrice;
       if (yahooQuote.marketCap) profile.marketCap = yahooQuote.marketCap;
@@ -91,7 +97,32 @@ export async function fetchCompanyAsset(
     return { data: asset, source: "fmp" };
   }
 
-  // ── CAS 2 : Profil FMP sans fondamentaux (ticker paywall) ─────────────
+  // ── CAS 2 : FMP partiel → fallback Yahoo fondamentaux ────────────────
+  console.log(`[DataService] FMP incomplet pour ${upper}, tentative Yahoo fondamentaux…`);
+  const yahooFundamentals = await getYahooFundamentals(upper);
+
+  if (yahooFundamentals && yahooFundamentals.entries.length > 0) {
+
+    const price = yahooQuote?.regularMarketPrice ?? profile?.price ?? 0;
+    const mktCap = yahooQuote?.marketCap ?? profile?.marketCap ?? 0;
+    const name = profile?.companyName ?? yahooQuote?.longName ?? yahooQuote?.shortName ?? upper;
+    const currency = yahooQuote?.currency ?? profile?.currency ?? "USD";
+
+    const asset = assembleFromYahoo(
+      yahooFundamentals,
+      upper,
+      name,
+      price,
+      mktCap,
+      currency,
+      priceHistory,
+      profile?.image,
+    );
+    setCache(upper, asset);
+    return { data: asset, source: "yahoo" };
+  }
+
+  // ── CAS 3 : Profil FMP sans aucun fondamental ────────────────────────
   if (profile) {
     const price = yahooQuote?.regularMarketPrice ?? profile.price;
     const asset: CompanyAsset = {
@@ -101,7 +132,7 @@ export async function fetchCompanyAsset(
         sector: "Technology",
         industry: profile.industry || "N/A",
         description: profile.description?.slice(0, 500) ||
-          "Données fondamentales indisponibles sur le plan gratuit FMP pour ce ticker.",
+          "Données fondamentales indisponibles pour ce ticker.",
         currency: "USD",
         currentPrice: price,
         logoUrl: profile.image,
@@ -124,7 +155,7 @@ export async function fetchCompanyAsset(
     return { data: asset, source: "fmp-partial" };
   }
 
-  // ── CAS 3 : Pas de profil FMP, Yahoo uniquement ──────────────────────
+  // ── CAS 4 : Pas de profil FMP, Yahoo quote seul ──────────────────────
   if (yahooQuote?.regularMarketPrice) {
     const asset: CompanyAsset = {
       profile: {
@@ -150,10 +181,10 @@ export async function fetchCompanyAsset(
       sectorData: { sectorName: "N/A", averagePER: 20, averageEVtoEBITDA: 12, averagePriceToFCF: 16 },
       priceHistory,
     };
-    return { data: asset, source: "yahoo" };
+    return { data: asset, source: "yahoo-minimal" };
   }
 
-  // ── CAS 4 : Rien ─────────────────────────────────────────────────────
+  // ── CAS 5 : Rien ─────────────────────────────────────────────────────
   throw new Error(
     `Nous n'avons pas pu récupérer les données pour « ${upper} ». ` +
     `Vérifiez que le ticker est correct ou réessayez dans quelques instants. ` +

@@ -135,7 +135,10 @@ export default function StockPage({
               className="text-xs px-2 py-0.5 rounded"
               style={{
                 background: "var(--bg-tertiary)",
-                color: dataSource === "fmp" ? "var(--emerald)" : dataSource === "cache" ? "var(--accent)" : "var(--amber)",
+                color: dataSource === "fmp" ? "var(--emerald)"
+                  : dataSource === "yahoo" ? "#8b5cf6"
+                  : dataSource === "cache" ? "var(--accent)"
+                  : "var(--amber)",
               }}
             >
               Source : {dataSource.toUpperCase()}

@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import YahooFinance from "yahoo-finance2";
+import YahooFinanceModule from "yahoo-finance2";
+
+const YahooFinance = new (YahooFinanceModule as any)({ suppressNotices: ["yahooSurvey"] });
+
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface YahooQuote {
   symbol: string;
@@ -19,6 +23,44 @@ export interface YahooHistoricalRow {
   volume: number;
 }
 
+export interface YahooFundamentalEntry {
+  date: string;
+  totalRevenue: number;
+  costOfRevenue: number;
+  grossProfit: number;
+  operatingExpense: number;
+  operatingIncome: number;
+  ebitda: number;
+  interestExpense: number;
+  taxProvision: number;
+  netIncome: number;
+  dilutedAverageShares: number;
+  cashAndCashEquivalents: number;
+  currentAssets: number;
+  totalAssets: number;
+  currentLiabilities: number;
+  shortTermDebt: number;
+  longTermDebt: number;
+  totalLiabilities: number;
+  stockholdersEquity: number;
+  operatingCashFlow: number;
+  freeCashFlow: number;
+  capitalExpenditure: number;
+  dividendsPaid: number;
+  shareRepurchases: number;
+}
+
+export interface YahooFundamentals {
+  entries: YahooFundamentalEntry[];
+  sharesOutstanding: number;
+  beta: number;
+  sector: string;
+  industry: string;
+  description: string;
+}
+
+// ─── Quote ──────────────────────────────────────────────────────────────────
+
 export async function getYahooQuote(symbol: string): Promise<YahooQuote | null> {
   try {
     const result: any = await YahooFinance.quote(symbol);
@@ -35,6 +77,8 @@ export async function getYahooQuote(symbol: string): Promise<YahooQuote | null> 
     return null;
   }
 }
+
+// ─── Historique prix ────────────────────────────────────────────────────────
 
 export async function getYahooHistorical(
   symbol: string,
@@ -68,6 +112,90 @@ export async function getYahooHistorical(
     return null;
   }
 }
+
+// ─── Fondamentaux (fundamentalsTimeSeries + quoteSummary pour méta) ─────────
+
+export async function getYahooFundamentals(
+  symbol: string
+): Promise<YahooFundamentals | null> {
+  try {
+    const [timeSeries, summary] = await Promise.all([
+      YahooFinance.fundamentalsTimeSeries(symbol, {
+        period1: "2018-01-01",
+        period2: new Date().toISOString().split("T")[0],
+        type: "annual",
+        module: "all",
+      }).catch(() => null),
+      YahooFinance.quoteSummary(symbol, {
+        modules: ["defaultKeyStatistics", "assetProfile"] as any,
+      }).catch(() => null),
+    ]);
+
+    if (!timeSeries?.length) {
+      console.warn("[Yahoo] fundamentalsTimeSeries: no data for", symbol);
+      return null;
+    }
+
+    const entries: YahooFundamentalEntry[] = timeSeries
+      .filter((r: any) => r.totalRevenue != null && r.totalAssets != null)
+      .map((r: any) => {
+        const opCF = r.operatingCashFlow ?? 0;
+        const fcf = r.freeCashFlow ?? 0;
+        const capex = r.capitalExpenditure != null
+          ? Math.abs(r.capitalExpenditure)
+          : Math.max(opCF - fcf, 0);
+
+        return {
+          date: r.date instanceof Date ? r.date.toISOString().split("T")[0] : String(r.date),
+          totalRevenue: r.totalRevenue ?? 0,
+          costOfRevenue: r.costOfRevenue ?? 0,
+          grossProfit: r.grossProfit ?? (r.totalRevenue - (r.costOfRevenue ?? 0)),
+          operatingExpense: r.operatingExpense ?? r.totalExpenses ?? 0,
+          operatingIncome: r.operatingIncome ?? r.EBIT ?? 0,
+          ebitda: r.EBITDA ?? r.normalizedEBITDA ?? ((r.operatingIncome ?? 0) + (r.depreciationAndAmortization ?? 0)),
+          interestExpense: Math.abs(r.interestExpense ?? r.interestExpenseNonOperating ?? 0),
+          taxProvision: r.taxProvision ?? 0,
+          netIncome: r.netIncome ?? r.netIncomeCommonStockholders ?? 0,
+          dilutedAverageShares: r.dilutedAverageShares ?? r.basicAverageShares ?? 0,
+          cashAndCashEquivalents: r.cashAndCashEquivalents ?? r.cashCashEquivalentsAndShortTermInvestments ?? 0,
+          currentAssets: r.currentAssets ?? 0,
+          totalAssets: r.totalAssets ?? 0,
+          currentLiabilities: r.currentLiabilities ?? 0,
+          shortTermDebt: r.currentDebtAndCapitalLeaseObligation ?? 0,
+          longTermDebt: r.longTermDebt ?? r.longTermDebtAndCapitalLeaseObligation ?? 0,
+          totalLiabilities: r.totalLiabilitiesNetMinorityInterest ?? 0,
+          stockholdersEquity: r.stockholdersEquity ?? r.commonStockEquity ?? 0,
+          operatingCashFlow: opCF,
+          freeCashFlow: fcf,
+          capitalExpenditure: capex,
+          dividendsPaid: Math.abs(r.commonDividendsPaid ?? 0),
+          shareRepurchases: Math.abs(r.repurchaseOfCapitalStock ?? r.commonStockIssuance ?? 0),
+        };
+      });
+
+    if (entries.length === 0) {
+      console.warn("[Yahoo] fundamentalsTimeSeries: no valid entries for", symbol);
+      return null;
+    }
+
+    const keyStats = summary?.defaultKeyStatistics ?? {};
+    const assetProfile = summary?.assetProfile ?? {};
+
+    return {
+      entries,
+      sharesOutstanding: (keyStats as any).sharesOutstanding ?? 0,
+      beta: (keyStats as any).beta ?? 1,
+      sector: (assetProfile as any).sector ?? "",
+      industry: (assetProfile as any).industry ?? "",
+      description: (assetProfile as any).longBusinessSummary?.slice(0, 500) ?? "",
+    };
+  } catch (err) {
+    console.warn("[Yahoo] fundamentals error:", err);
+    return null;
+  }
+}
+
+// ─── Recherche ──────────────────────────────────────────────────────────────
 
 export async function searchYahoo(
   query: string,

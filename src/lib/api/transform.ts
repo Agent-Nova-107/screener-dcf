@@ -16,7 +16,11 @@ import type {
   FMPCashFlow,
   FMPHistoricalPrice,
 } from "./fmp";
-import type { YahooHistoricalRow } from "./yahoo";
+import type {
+  YahooHistoricalRow,
+  YahooFundamentalEntry,
+  YahooFundamentals,
+} from "./yahoo";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -134,7 +138,120 @@ export function transformYahooPrices(rows: YahooHistoricalRow[]): PricePoint[] {
   }));
 }
 
-// ─── Assemblage CompanyAsset ─────────────────────────────────────────────────
+// ─── Yahoo fundamentalsTimeSeries → types internes ──────────────────────────
+
+function yahooEntryToIncomeStatement(e: YahooFundamentalEntry): IncomeStatement {
+  const rev = e.totalRevenue || 1;
+  return {
+    year: new Date(e.date).getFullYear(),
+    revenue: e.totalRevenue,
+    costOfRevenue: e.costOfRevenue,
+    grossProfit: e.grossProfit,
+    grossMargin: rev > 0 ? e.grossProfit / rev : 0,
+    operatingExpenses: e.operatingExpense,
+    ebit: e.operatingIncome,
+    ebitMargin: rev > 0 ? e.operatingIncome / rev : 0,
+    ebitda: e.ebitda,
+    ebitdaMargin: rev > 0 ? e.ebitda / rev : 0,
+    interestExpense: e.interestExpense,
+    incomeTax: e.taxProvision,
+    netIncome: e.netIncome,
+    netMargin: rev > 0 ? e.netIncome / rev : 0,
+    eps: e.dilutedAverageShares > 0 ? e.netIncome / e.dilutedAverageShares : 0,
+  };
+}
+
+function yahooEntryToBalanceSheet(e: YahooFundamentalEntry): BalanceSheet {
+  const totalDebt = e.shortTermDebt + e.longTermDebt;
+  const investedCapital = e.stockholdersEquity + totalDebt - e.cashAndCashEquivalents;
+  return {
+    year: new Date(e.date).getFullYear(),
+    cashAndEquivalents: e.cashAndCashEquivalents,
+    currentAssets: e.currentAssets,
+    totalAssets: e.totalAssets,
+    currentLiabilities: e.currentLiabilities,
+    shortTermDebt: e.shortTermDebt,
+    longTermDebt: e.longTermDebt,
+    totalLiabilities: e.totalLiabilities,
+    shareholdersEquity: e.stockholdersEquity,
+    investedCapital: Math.max(investedCapital, 1),
+  };
+}
+
+function yahooEntryToCashFlow(e: YahooFundamentalEntry): CashFlowStatement {
+  return {
+    year: new Date(e.date).getFullYear(),
+    operatingCashFlow: e.operatingCashFlow,
+    capitalExpenditures: e.capitalExpenditure,
+    freeCashFlow: e.freeCashFlow,
+    dividendsPaid: e.dividendsPaid,
+    shareRepurchases: e.shareRepurchases,
+  };
+}
+
+export function assembleFromYahoo(
+  fundamentals: YahooFundamentals,
+  ticker: string,
+  name: string,
+  currentPrice: number,
+  marketCap: number,
+  currency: string,
+  priceHistory: PricePoint[],
+  logoUrl?: string,
+): CompanyAsset {
+  const sorted = [...fundamentals.entries].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  );
+
+  const sector = mapSector(fundamentals.sector);
+
+  const last = sorted[sorted.length - 1];
+  const effectiveTax =
+    last && last.netIncome !== 0 && (last.netIncome + last.taxProvision) !== 0
+      ? last.taxProvision / (last.netIncome + last.taxProvision)
+      : 0.21;
+
+  const totalDebt = last ? last.shortTermDebt + last.longTermDebt : 0;
+  const costOfDebt =
+    last && totalDebt > 0
+      ? Math.min(Math.max(last.interestExpense / totalDebt, 0.01), 0.15)
+      : 0.05;
+
+  const sharesOut = fundamentals.sharesOutstanding > 0
+    ? fundamentals.sharesOutstanding
+    : (last.dilutedAverageShares > 0 ? last.dilutedAverageShares
+      : (marketCap > 0 && currentPrice > 0 ? Math.round(marketCap / currentPrice) : 1));
+
+  const currentMetrics: CurrentMetrics = {
+    sharesOutstanding: sharesOut,
+    beta: fundamentals.beta || 1,
+    effectiveTaxRate: Math.max(Math.min(effectiveTax, 0.5), 0),
+    costOfDebt,
+    dividendYield: 0,
+    marketCap: marketCap || currentPrice,
+  };
+
+  return {
+    profile: {
+      ticker,
+      name,
+      sector,
+      industry: fundamentals.industry || "N/A",
+      description: fundamentals.description || "Données fournies par Yahoo Finance.",
+      currency: mapCurrency(currency),
+      currentPrice,
+      logoUrl,
+    },
+    incomeStatements: sorted.map(yahooEntryToIncomeStatement),
+    balanceSheets: sorted.map(yahooEntryToBalanceSheet),
+    cashFlowStatements: sorted.map(yahooEntryToCashFlow),
+    currentMetrics,
+    sectorData: SECTOR_MULTIPLES[sector] ?? SECTOR_MULTIPLES["Technology"],
+    priceHistory,
+  };
+}
+
+// ─── Assemblage CompanyAsset (FMP) ──────────────────────────────────────────
 
 export function assembleCompanyAsset(
   profile: FMPProfile,
