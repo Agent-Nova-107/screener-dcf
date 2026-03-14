@@ -50,6 +50,7 @@ export function Sidebar() {
   const [dragTicker, setDragTicker] = useState<string | null>(null);
   const [dragName, setDragName] = useState<string>("");
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [dropSuccess, setDropSuccess] = useState<string | null>(null);
 
   const supabase = (configured ? createClient() : null) as SupabaseClient | null;
 
@@ -146,6 +147,8 @@ export function Sidebar() {
 
     if (data) {
       setListItems((p) => ({ ...p, [listId]: [...(p[listId] ?? []), data] }));
+      setDropSuccess(listId);
+      setTimeout(() => setDropSuccess(null), 600);
     }
 
     if (!expanded[listId]) {
@@ -315,32 +318,36 @@ export function Sidebar() {
             count={hydrated ? watchlist.length : 0}
             isDefault
           />
-          {expanded["watchlist"] && hydrated && (
-            <div className="pb-2">
-              {watchlist.length === 0 ? (
-                <p className="text-xs px-7 py-1" style={{ color: "var(--text-muted)" }}>
-                  Ctrl+K pour ajouter
-                </p>
-              ) : (
-                watchlist.map((entry) => (
-                  <DraggableItem
-                    key={entry.ticker}
-                    ticker={entry.ticker}
-                    name={entry.name}
-                    color={entry.signal ? signalToColor(entry.signal) : undefined}
-                    badge={
-                      entry.safetyMargin != null
-                        ? `${(entry.safetyMargin * 100).toFixed(0)}%`
-                        : entry.currentPrice > 0
-                          ? `$${entry.currentPrice.toFixed(0)}`
-                          : undefined
-                    }
-                    onRemove={() => removeFromWatchlist(entry.ticker)}
-                  />
-                ))
+          <div className={`collapse-wrapper ${expanded["watchlist"] ? "open" : ""}`}>
+            <div className="collapse-inner">
+              {hydrated && (
+                <div className="pb-2">
+                  {watchlist.length === 0 ? (
+                    <p className="text-xs px-7 py-2" style={{ color: "var(--text-muted)" }}>
+                      Utilisez <kbd className="font-mono px-1 py-0.5 rounded text-xs" style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}>Ctrl+K</kbd> pour rechercher et ajouter un actif
+                    </p>
+                  ) : (
+                    watchlist.map((entry) => (
+                      <DraggableItem
+                        key={entry.ticker}
+                        ticker={entry.ticker}
+                        name={entry.name}
+                        color={entry.signal ? signalToColor(entry.signal) : undefined}
+                        badge={
+                          entry.safetyMargin != null
+                            ? `${(entry.safetyMargin * 100).toFixed(0)}%`
+                            : entry.currentPrice > 0
+                              ? `$${entry.currentPrice.toFixed(0)}`
+                              : undefined
+                        }
+                        onRemove={() => removeFromWatchlist(entry.ticker)}
+                      />
+                    ))
+                  )}
+                </div>
               )}
             </div>
-          )}
+          </div>
         </div>
 
         {/* ── Section listes custom (Supabase) ── */}
@@ -380,51 +387,72 @@ export function Sidebar() {
                   Glissez un ticker depuis la Watchlist vers une liste custom.
                 </p>
               ) : (
-                customLists.map((wl) => (
-                  <div key={wl.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <ListHeader
-                      id={wl.id}
-                      name={wl.name}
-                      icon={<FolderPlus className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--accent)" }} />}
-                      count={listItems[wl.id]?.length ?? 0}
-                    />
-                    {expanded[wl.id] && (
-                      <div className="pb-2">
-                        {!listItems[wl.id] ? (
-                          <div className="px-7 py-1">
-                            <Loader2 className="h-3 w-3 animate-spin" style={{ color: "var(--text-muted)" }} />
+                customLists.map((wl) => {
+                  const isOver = dragOver === wl.id && dragTicker !== null;
+                  const justDropped = dropSuccess === wl.id;
+                  return (
+                    <div
+                      key={wl.id}
+                      className={justDropped ? "drop-success" : ""}
+                      style={{ borderBottom: "1px solid var(--border)" }}
+                      onDragOver={(e) => {
+                        if (dragTicker) {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "copy";
+                          setDragOver(wl.id);
+                        }
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(null);
+                      }}
+                      onDrop={(e) => { e.preventDefault(); onDropOnList(wl.id); }}
+                    >
+                      <ListHeader
+                        id={wl.id}
+                        name={wl.name}
+                        icon={<FolderPlus className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--accent)" }} />}
+                        count={listItems[wl.id]?.length ?? 0}
+                      />
+                      <div className={`collapse-wrapper ${expanded[wl.id] ? "open" : ""}`}>
+                        <div className="collapse-inner">
+                          <div className="pb-2">
+                            {!listItems[wl.id] && expanded[wl.id] ? (
+                              <div className="px-7 py-1">
+                                <Loader2 className="h-3 w-3 animate-spin" style={{ color: "var(--text-muted)" }} />
+                              </div>
+                            ) : (listItems[wl.id]?.length ?? 0) === 0 ? (
+                              <p
+                                className={`text-xs px-5 py-2 rounded mx-3 transition-all duration-200 ${isOver ? "drop-active" : ""}`}
+                                style={{
+                                  color: isOver ? "var(--accent)" : "var(--text-muted)",
+                                  background: isOver ? "rgba(59,130,246,0.08)" : "transparent",
+                                  border: dragTicker ? "1px dashed var(--accent)" : "1px dashed transparent",
+                                }}
+                              >
+                                {isOver ? "↓ Déposez pour ajouter" : dragTicker ? "Glissez ici" : "Vide — glissez un actif ici"}
+                              </p>
+                            ) : (
+                              listItems[wl.id]?.map((item) => (
+                                <DraggableItem
+                                  key={item.id}
+                                  ticker={item.ticker}
+                                  name={item.name}
+                                  badge={
+                                    item.safety_margin != null
+                                      ? `${(Number(item.safety_margin) * 100).toFixed(0)}%`
+                                      : undefined
+                                  }
+                                  color={item.signal ? signalToColor(item.signal as "STRONG_BUY") : undefined}
+                                  onRemove={() => removeItem(wl.id, item.id)}
+                                />
+                              ))
+                            )}
                           </div>
-                        ) : listItems[wl.id].length === 0 ? (
-                          <p
-                            className="text-xs px-7 py-2 rounded mx-3"
-                            style={{
-                              color: "var(--text-muted)",
-                              background: dragTicker ? "rgba(59,130,246,0.05)" : "transparent",
-                              border: dragTicker ? "1px dashed var(--accent)" : "1px dashed transparent",
-                            }}
-                          >
-                            {dragTicker ? "Déposez ici" : "Vide — glissez un actif ici"}
-                          </p>
-                        ) : (
-                          listItems[wl.id].map((item) => (
-                            <DraggableItem
-                              key={item.id}
-                              ticker={item.ticker}
-                              name={item.name}
-                              badge={
-                                item.safety_margin != null
-                                  ? `${(Number(item.safety_margin) * 100).toFixed(0)}%`
-                                  : undefined
-                              }
-                              color={item.signal ? signalToColor(item.signal as "STRONG_BUY") : undefined}
-                              onRemove={() => removeItem(wl.id, item.id)}
-                            />
-                          ))
-                        )}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                ))
+                    </div>
+                  );
+                })
               )}
             </>
           )}

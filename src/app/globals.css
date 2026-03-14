@@ -50,3 +50,35 @@ body {
     background: var(--bg-tertiary);
   }
 }
+
+/* Smooth expand/collapse for sidebar sections */
+.collapse-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease-out;
+}
+.collapse-wrapper.open {
+  grid-template-rows: 1fr;
+}
+.collapse-wrapper > .collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Drop zone pulse */
+@keyframes drop-pulse {
+  0%, 100% { border-color: var(--accent); opacity: 0.6; }
+  50% { border-color: var(--accent); opacity: 1; }
+}
+.drop-active {
+  animation: drop-pulse 1s ease-in-out infinite;
+}
+
+/* Flash green on successful drop */
+@keyframes drop-success {
+  0% { background: rgba(16,185,129,0.2); }
+  100% { background: transparent; }
+}
+.drop-success {
+  animation: drop-success 600ms ease-out;
+}
