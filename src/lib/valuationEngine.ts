@@ -2,6 +2,19 @@ import type {
   CompanyAsset,
   DCFResult,
   DCFParameters,
+  DcfScenarios,
+  DcfScenarioId,
+  DcfScenarioResult,
+  DcfSensitivityMatrix3x3,
+  DcfSensitivityCell3x3,
+  FeatureAvailability,
+  FundamentalMomentumResult,
+  RelativeMultiplesSummary,
+  RelativeMultipleResult,
+  RelativeMultipleKey,
+  StockEvaluationV2,
+  ValuationMethodResult,
+  ValuationTriangulation,
   FullValuationResult,
   FundamentalRatios,
   MoatScore,
@@ -550,11 +563,7 @@ export function computeFullValuation(
 
   const signal = safetyMarginToSignal(safetyMargin);
 
-  const sensitivityMatrix = computeSensitivityMatrix(
-    asset,
-    params,
-    waccBreakdown.wacc
-  );
+  const sensitivityMatrix = computeSensitivityMatrix(asset, params, waccBreakdown.wacc);
 
   return {
     waccBreakdown,
@@ -586,4 +595,450 @@ export function formatPercent(value: number, decimals = 1): string {
 
 export function formatMultiple(value: number): string {
   return `${value.toFixed(1)}x`;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// V2 — NOUVEAU MOTEUR (spec TrueStockScreener)
+// ═════════════════════════════════════════════════════════════════════════════
+
+function clamp01(x: number): number {
+  return Math.max(0, Math.min(1, x));
+}
+
+function median(values: number[]): number | null {
+  const nums = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (nums.length === 0) return null;
+  const mid = Math.floor(nums.length / 2);
+  return nums.length % 2 === 1 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+}
+
+export function isDcfApplicable(asset: CompanyAsset): { ok: boolean; reason?: string } {
+  const cfs = asset.cashFlowStatements;
+  if (!cfs || cfs.length < 2) return { ok: false, reason: "Historique FCF insuffisant" };
+  const last = cfs[cfs.length - 1]?.freeCashFlow ?? 0;
+  const prev = cfs[cfs.length - 2]?.freeCashFlow ?? 0;
+  if (last < 0 && prev < 0) return { ok: false, reason: "FCF négatif sur les 2 derniers exercices" };
+  return { ok: true };
+}
+
+function computeDcfScenario(
+  asset: CompanyAsset,
+  params: DCFParameters,
+  scenario: DcfScenarioId
+): DcfScenarioResult {
+  const waccBreakdown = computeWACC(asset, params);
+  const dcf = computeDCF(asset, params, waccBreakdown);
+  return {
+    scenario,
+    params,
+    wacc: waccBreakdown.wacc,
+    fairValuePerShare: dcf.intrinsicValuePerShare,
+    enterpriseValue: dcf.enterpriseValue,
+    equityValue: dcf.equityValue,
+    netDebt: dcf.netDebt,
+    projectedFCFs: dcf.projectedFCFs,
+    terminalValue: dcf.terminalValue,
+  };
+}
+
+export function computeDCFScenarios(
+  asset: CompanyAsset,
+  baseParams: DCFParameters,
+): DcfScenarios {
+  const applicability = isDcfApplicable(asset);
+  if (!applicability.ok) {
+    return {
+      applicable: false,
+      reasonIfNotApplicable: applicability.reason,
+      scenarios: {
+        bear: computeDcfScenario(asset, baseParams, "bear"),
+        base: computeDcfScenario(asset, baseParams, "base"),
+        bull: computeDcfScenario(asset, baseParams, "bull"),
+      },
+    };
+  }
+
+  // Δ defaults (MVP) — ajustables plus tard via settings UI
+  const DELTA_WACC = 0.01; // ±1%
+  const DELTA_G = 0.005; // ±0.5%
+  const DELTA_FCF_GROWTH = 0.03; // ±3%
+
+  const baseWacc = computeWACC(asset, baseParams).wacc;
+
+  const bearParams: DCFParameters = {
+    ...baseParams,
+    fcfGrowthRate: baseParams.fcfGrowthRate - DELTA_FCF_GROWTH,
+    terminalGrowthRate: baseParams.terminalGrowthRate - DELTA_G,
+    manualWACC: Math.max(baseWacc + DELTA_WACC, 0.02),
+  };
+  const bullParams: DCFParameters = {
+    ...baseParams,
+    fcfGrowthRate: baseParams.fcfGrowthRate + DELTA_FCF_GROWTH,
+    terminalGrowthRate: baseParams.terminalGrowthRate + DELTA_G,
+    manualWACC: Math.max(baseWacc - DELTA_WACC, 0.02),
+  };
+
+  const baseScenario = computeDcfScenario(asset, baseParams, "base");
+  const discountToFairValueBase =
+    baseScenario.fairValuePerShare > 0
+      ? (baseScenario.fairValuePerShare - asset.profile.currentPrice) / baseScenario.fairValuePerShare
+      : null;
+
+  return {
+    applicable: true,
+    scenarios: {
+      bear: computeDcfScenario(asset, bearParams, "bear"),
+      base: baseScenario,
+      bull: computeDcfScenario(asset, bullParams, "bull"),
+    },
+    discountToFairValueBase: discountToFairValueBase ?? undefined,
+  };
+}
+
+export function computeDcfSensitivity3x3(
+  asset: CompanyAsset,
+  baseParams: DCFParameters
+): DcfSensitivityMatrix3x3 {
+  const applicability = isDcfApplicable(asset);
+  if (!applicability.ok) {
+    return {
+      applicable: false,
+      reasonIfNotApplicable: applicability.reason,
+      waccValues: [],
+      terminalGrowthValues: [],
+      matrix: [],
+    };
+  }
+
+  const baseWacc = computeWACC(asset, baseParams).wacc;
+  const waccValues = [baseWacc - 0.01, baseWacc, baseWacc + 0.01].map((w) => Math.max(w, 0.02));
+  const gValues = [baseParams.terminalGrowthRate - 0.01, baseParams.terminalGrowthRate, baseParams.terminalGrowthRate + 0.01];
+
+  const matrix: DcfSensitivityCell3x3[][] = waccValues.map((w) => {
+    return gValues.map((g) => {
+      const safeG = Math.min(g, w - 0.005);
+      const params: DCFParameters = { ...baseParams, manualWACC: w, terminalGrowthRate: safeG };
+      const waccBD: WACCBreakdown = { costOfEquity: 0, costOfDebt: 0, equityWeight: 0, debtWeight: 0, wacc: w };
+      const dcf = computeDCF(asset, params, waccBD);
+      return {
+        wacc: w,
+        terminalGrowth: g,
+        fairValuePerShare: dcf.intrinsicValuePerShare,
+      };
+    });
+  });
+
+  return {
+    applicable: true,
+    waccValues,
+    terminalGrowthValues: gValues,
+    matrix,
+  };
+}
+
+function mkMultiple(
+  key: RelativeMultipleKey,
+  label: string,
+  value: number | null,
+  notes?: string
+): RelativeMultipleResult {
+  return {
+    key,
+    label,
+    value: value != null && Number.isFinite(value) ? value : null,
+    sectorMedian: null,
+    premiumVsSectorMedianPct: null,
+    notes,
+  };
+}
+
+export function computeRelativeMultiples(asset: CompanyAsset): RelativeMultiplesSummary {
+  const cm = asset.currentMetrics;
+  const lastIS = asset.incomeStatements[asset.incomeStatements.length - 1];
+  const lastBS = asset.balanceSheets[asset.balanceSheets.length - 1];
+  const lastCF = asset.cashFlowStatements[asset.cashFlowStatements.length - 1];
+
+  const price = asset.profile.currentPrice;
+  const shares = cm.sharesOutstanding;
+  const mcap = cm.marketCap;
+
+  const nd = netDebt(lastBS.shortTermDebt, lastBS.longTermDebt, lastBS.cashAndEquivalents);
+  const ev = mcap + nd;
+
+  const eps = lastIS?.eps ?? null;
+  const revenue = lastIS?.revenue ?? null;
+  const ebitda = lastIS?.ebitda ?? null;
+  const ebit = lastIS?.ebit ?? null;
+  const fcf = lastCF?.freeCashFlow ?? null;
+  const equity = lastBS?.shareholdersEquity ?? null;
+
+  const bookPerShare = equity != null && shares > 0 ? equity / shares : null;
+
+  const pe = eps && eps !== 0 ? price / eps : null;
+  const ps = revenue && revenue !== 0 ? mcap / revenue : null;
+  const evSales = revenue && revenue !== 0 ? ev / revenue : null;
+  const evEbitda = ebitda && ebitda !== 0 ? ev / ebitda : null;
+  const evEbit = ebit && ebit !== 0 ? ev / ebit : null;
+  const pFcf = fcf && fcf !== 0 ? mcap / fcf : null;
+  const pb = bookPerShare && bookPerShare !== 0 ? price / bookPerShare : null;
+
+  const multiples: RelativeMultipleResult[] = [
+    mkMultiple("pe", "P/E", pe, eps == null ? "EPS indisponible" : eps <= 0 ? "EPS ≤ 0 (non pertinent)" : undefined),
+    mkMultiple("forwardPe", "Forward P/E", null, "Non disponible (consensus non configuré)"),
+    mkMultiple("peg", "PEG", null, "Non disponible (consensus/croissance EPS non configurés)"),
+    mkMultiple("evEbitda", "EV/EBITDA", evEbitda, ebitda == null ? "EBITDA indisponible" : ebitda <= 0 ? "EBITDA ≤ 0 (non pertinent)" : undefined),
+    mkMultiple("evEbit", "EV/EBIT", evEbit, ebit == null ? "EBIT indisponible" : ebit <= 0 ? "EBIT ≤ 0 (non pertinent)" : undefined),
+    mkMultiple("ps", "P/S", ps, revenue == null ? "Revenue indisponible" : revenue <= 0 ? "Revenue ≤ 0 (non pertinent)" : undefined),
+    mkMultiple("pFcf", "P/FCF", pFcf, fcf == null ? "FCF indisponible" : fcf <= 0 ? "FCF ≤ 0 (non pertinent)" : undefined),
+    mkMultiple("pb", "P/B", pb, bookPerShare == null ? "Book value indisponible" : bookPerShare <= 0 ? "Book value ≤ 0 (non pertinent)" : undefined),
+    mkMultiple("evSales", "EV/Sales", evSales, revenue == null ? "Revenue indisponible" : revenue <= 0 ? "Revenue ≤ 0 (non pertinent)" : undefined),
+  ];
+
+  // Sans provider peers/sector median, on ne peut pas déterminer undervaluation relative proprement.
+  // MVP: multiMethodUndervalued désactivé.
+  return {
+    applicable: true,
+    multiples,
+    multiMethodUndervalued: false,
+  };
+}
+
+export function computeNavPerShare(asset: CompanyAsset): number | null {
+  const lastBS = asset.balanceSheets[asset.balanceSheets.length - 1];
+  const shares = asset.currentMetrics.sharesOutstanding;
+  if (!lastBS || shares <= 0) return null;
+  const nav = (lastBS.totalAssets - lastBS.totalLiabilities) / shares;
+  return Number.isFinite(nav) ? nav : null;
+}
+
+export function computeTriangulationV2(
+  asset: CompanyAsset,
+  dcf: DcfScenarios,
+  multiples: RelativeMultiplesSummary,
+): ValuationTriangulation {
+  const methods: ValuationMethodResult[] = [];
+
+  const dcfBase = dcf.scenarios?.base?.fairValuePerShare ?? null;
+  methods.push({
+    method: "DCF",
+    applicable: dcf.applicable && dcfBase != null,
+    fairValuePerShare: dcf.applicable ? dcfBase : null,
+    notes: dcf.applicable ? undefined : dcf.reasonIfNotApplicable,
+  });
+
+  // Multiples: utiliser une estimation simple via la valorisation relative existante si fondamentaux présents
+  let multiplesFV: number | null = null;
+  try {
+    const rel = computeRelativeValuation(asset);
+    multiplesFV = rel.averageRelativeValue;
+  } catch {
+    multiplesFV = null;
+  }
+  methods.push({
+    method: "MULTIPLES",
+    applicable: multiplesFV != null && Number.isFinite(multiplesFV),
+    fairValuePerShare: multiplesFV,
+    notes: "Peers/percentiles non configurés (MVP)",
+  });
+
+  const nav = computeNavPerShare(asset);
+  methods.push({
+    method: "NAV",
+    applicable: nav != null,
+    fairValuePerShare: nav,
+  });
+
+  // Placeholders (MVP)
+  methods.push({ method: "DDM", applicable: false, fairValuePerShare: null, notes: "Non implémenté (MVP)" });
+  methods.push({ method: "RIM", applicable: false, fairValuePerShare: null, notes: "Non implémenté (MVP)" });
+
+  const used = methods.filter((m) => m.applicable && m.fairValuePerShare != null).slice(0, 3);
+  const fvs = used.map((m) => m.fairValuePerShare!).filter((x) => Number.isFinite(x));
+
+  const rangeMin = fvs.length ? Math.min(...fvs) : null;
+  const rangeMax = fvs.length ? Math.max(...fvs) : null;
+  const medianFV = median(fvs);
+
+  const price = asset.profile.currentPrice;
+  const upside = medianFV != null && price > 0 ? (medianFV - price) / price : null;
+  const gap = (rangeMin != null && rangeMax != null && medianFV != null && medianFV !== 0)
+    ? (rangeMax - rangeMin) / Math.abs(medianFV)
+    : null;
+
+  let conviction: ValuationTriangulation["conviction"] = "LOW";
+  if (gap == null) conviction = "LOW";
+  else if (gap < 0.15) conviction = "HIGH";
+  else if (gap <= 0.30) conviction = "MEDIUM";
+  else conviction = "LOW";
+
+  return {
+    methodsUsed: used,
+    rangeMin,
+    rangeMax,
+    medianFairValue: medianFV,
+    upsideDownsidePct: upside,
+    convergenceGapPct: gap,
+    conviction,
+  };
+}
+
+export function computeFundamentalMomentumV2(asset: CompanyAsset, wacc: number | null): FundamentalMomentumResult {
+  const iss = asset.incomeStatements;
+  const bss = asset.balanceSheets;
+  const cfs = asset.cashFlowStatements;
+
+  const lastIS = iss[iss.length - 1];
+  const prevIS = iss.length >= 2 ? iss[iss.length - 2] : null;
+  const lastBS = bss[bss.length - 1];
+  const prevBS = bss.length >= 2 ? bss[bss.length - 2] : null;
+  const lastCF = cfs[cfs.length - 1];
+  const prevCF = cfs.length >= 2 ? cfs[cfs.length - 2] : null;
+
+  const revenueGrowthYoY =
+    prevIS && prevIS.revenue !== 0 ? (lastIS.revenue - prevIS.revenue) / Math.abs(prevIS.revenue) : null;
+
+  const bps = (curr: number, prev: number) => (curr - prev) * 10000;
+
+  const grossMarginBpsYoY = prevIS ? bps(lastIS.grossMargin, prevIS.grossMargin) : null;
+  const ebitdaMarginBpsYoY = prevIS ? bps(lastIS.ebitdaMargin, prevIS.ebitdaMargin) : null;
+  const ebitMarginBpsYoY = prevIS ? bps(lastIS.ebitMargin, prevIS.ebitMargin) : null;
+  const netMarginBpsYoY = prevIS ? bps(lastIS.netMargin, prevIS.netMargin) : null;
+
+  const fcfMargin = lastIS.revenue !== 0 ? lastCF.freeCashFlow / lastIS.revenue : null;
+  const prevFcfMargin = prevIS && prevCF && prevIS.revenue !== 0 ? prevCF.freeCashFlow / prevIS.revenue : null;
+  const fcfMarginBpsYoY = prevFcfMargin != null && fcfMargin != null ? bps(fcfMargin, prevFcfMargin) : null;
+
+  const accrualRatio = lastBS.totalAssets !== 0
+    ? (lastIS.netIncome - lastCF.freeCashFlow) / lastBS.totalAssets
+    : null;
+
+  const cashConversionRate = lastIS.netIncome !== 0 ? lastCF.freeCashFlow / lastIS.netIncome : null;
+
+  const epsGrowthYoY = prevIS && prevIS.eps !== 0
+    ? (lastIS.eps - prevIS.eps) / Math.abs(prevIS.eps)
+    : null;
+
+  const fcfYield = asset.currentMetrics.marketCap > 0 ? lastCF.freeCashFlow / asset.currentMetrics.marketCap : null;
+  const fcfGrowthYoY = prevCF && prevCF.freeCashFlow !== 0
+    ? (lastCF.freeCashFlow - prevCF.freeCashFlow) / Math.abs(prevCF.freeCashFlow)
+    : null;
+
+  const roicValue = lastBS.investedCapital !== 0
+    ? roic(lastIS.ebit, asset.currentMetrics.effectiveTaxRate, lastBS.investedCapital)
+    : null;
+  const roicMinusWacc = roicValue != null && wacc != null ? roicValue - wacc : null;
+
+  const nd = netDebt(lastBS.shortTermDebt, lastBS.longTermDebt, lastBS.cashAndEquivalents);
+  const netDebtToEbitda = lastIS.ebitda > 0 ? nd / lastIS.ebitda : null;
+  const currentRatioValue = currentRatio(lastBS.currentAssets, lastBS.currentLiabilities);
+  const interestCoverage = lastIS.interestExpense !== 0 ? lastIS.ebit / Math.abs(lastIS.interestExpense) : null;
+
+  const badges = {
+    operationalLeverageConfirmed:
+      (revenueGrowthYoY ?? 0) > 0 &&
+      (grossMarginBpsYoY ?? 0) > 0 &&
+      (ebitdaMarginBpsYoY ?? 0) > 0,
+    marginErosionWarning:
+      (revenueGrowthYoY ?? 0) > 0 &&
+      (grossMarginBpsYoY ?? 0) < -200,
+    highEarningsQuality:
+      (cashConversionRate ?? 0) > 0.8 &&
+      (accrualRatio ?? 1) < 0.03,
+    earningsQualityWarning:
+      (epsGrowthYoY ?? 0) > 0 &&
+      (fcfGrowthYoY ?? 0) < 0,
+    balanceSheetRisk:
+      ((netDebtToEbitda ?? 0) > 4 && lastCF.freeCashFlow < 0) ||
+      ((interestCoverage ?? Infinity) < 2),
+  };
+
+  return {
+    revenueGrowthYoY,
+    grossMarginBpsYoY,
+    ebitdaMarginBpsYoY,
+    ebitMarginBpsYoY,
+    netMarginBpsYoY,
+    fcfMarginBpsYoY,
+    accrualRatio,
+    cashConversionRate,
+    epsGrowthYoY,
+    fcfYield,
+    fcfGrowthYoY,
+    roic: roicValue,
+    wacc,
+    roicMinusWacc,
+    netDebtToEbitda,
+    currentRatio: Number.isFinite(currentRatioValue) ? currentRatioValue : null,
+    interestCoverage,
+    badges,
+  };
+}
+
+export function computeCompositeMomentumScoreV2(momentum: FundamentalMomentumResult): { score0to100: number | null; partial: boolean; notes?: string } {
+  // MVP: pas de revisions analystes, pas de percentile sectoriel, pas de momentum prix robuste → score partiel.
+  const parts: { w: number; s: number | null }[] = [];
+
+  // EPS momentum proxy
+  if (momentum.epsGrowthYoY != null) {
+    const s = clamp01((momentum.epsGrowthYoY + 0.10) / 0.40) * 100; // -10%..+30% → 0..100
+    parts.push({ w: 0.35, s });
+  } else {
+    parts.push({ w: 0.35, s: null });
+  }
+
+  // Earnings quality proxy
+  if (momentum.cashConversionRate != null && momentum.accrualRatio != null) {
+    const cash = clamp01(momentum.cashConversionRate / 1.0);
+    const accr = clamp01(1 - (momentum.accrualRatio / 0.08)); // 8%+ mauvais
+    parts.push({ w: 0.35, s: (cash * 0.6 + accr * 0.4) * 100 });
+  } else {
+    parts.push({ w: 0.35, s: null });
+  }
+
+  // Balance sheet proxy
+  if (momentum.netDebtToEbitda != null) {
+    const nd = clamp01(1 - (momentum.netDebtToEbitda / 6)); // 0..6x
+    parts.push({ w: 0.30, s: nd * 100 });
+  } else {
+    parts.push({ w: 0.30, s: null });
+  }
+
+  const available = parts.filter((p) => p.s != null) as { w: number; s: number }[];
+  if (available.length === 0) return { score0to100: null, partial: true, notes: "Données insuffisantes" };
+
+  const wSum = available.reduce((sum, p) => sum + p.w, 0);
+  const score = available.reduce((sum, p) => sum + (p.w / wSum) * p.s, 0);
+  return { score0to100: Math.round(score), partial: true, notes: "Score partiel (sans prix/revisions/percentiles)" };
+}
+
+export function computeStockEvaluationV2(
+  asset: CompanyAsset,
+  params: DCFParameters,
+  moat: MoatScore
+): StockEvaluationV2 {
+  const features: FeatureAvailability = {
+    estimatesAndRevisions: false,
+    peersAndSectorPercentiles: false,
+  };
+
+  const dcf = computeDCFScenarios(asset, params);
+  const dcfSensitivity = computeDcfSensitivity3x3(asset, params);
+  const multiples = computeRelativeMultiples(asset);
+
+  const wacc = computeWACC(asset, params).wacc;
+  const momentum = computeFundamentalMomentumV2(asset, wacc);
+  const compositeMomentum = computeCompositeMomentumScoreV2(momentum);
+
+  const triangulation = computeTriangulationV2(asset, dcf, multiples);
+
+  return {
+    features,
+    currentPrice: asset.profile.currentPrice,
+    dcf,
+    dcfSensitivity,
+    multiples,
+    triangulation,
+    momentum,
+    compositeMomentum,
+  };
 }

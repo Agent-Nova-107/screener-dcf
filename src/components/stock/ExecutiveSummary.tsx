@@ -1,21 +1,29 @@
 "use client";
 
-import type { CompanyAsset, FullValuationResult } from "@/types";
-import { signalToColor, signalToLabel } from "@/types";
+import type { CompanyAsset, StockEvaluationV2 } from "@/types";
 import { formatPercent, formatCurrency } from "@/lib/valuationEngine";
 
 interface Props {
   asset: CompanyAsset;
-  valuation: FullValuationResult;
+  evaluation: StockEvaluationV2;
 }
 
-export function ExecutiveSummary({ asset, valuation }: Props) {
-  const { profile } = asset;
-  const { finalFairValue, safetyMargin, signal } = valuation;
-  const color = signalToColor(signal);
-  const label = signalToLabel(signal);
+function bandFromDiscount(discountToFairValue: number) {
+  // Discount = (FV - P) / FV
+  if (discountToFairValue > 0.20) return { label: "Potentiellement sous-coté", color: "var(--emerald)" };
+  if (discountToFairValue >= 0) return { label: "Légèrement sous-coté", color: "#4ade80" };
+  if (discountToFairValue >= -0.30) return { label: "Surcoté", color: "var(--amber)" };
+  return { label: "Très surcoté", color: "var(--red)" };
+}
 
-  const gaugePercent = Math.max(Math.min(safetyMargin * 100, 60), -40);
+export function ExecutiveSummary({ asset, evaluation }: Props) {
+  const { profile } = asset;
+  const fairValue = evaluation.triangulation.medianFairValue ?? evaluation.dcf.scenarios.base.fairValuePerShare;
+  const discountToFairValue =
+    fairValue > 0 ? (fairValue - profile.currentPrice) / fairValue : 0;
+  const band = bandFromDiscount(discountToFairValue);
+
+  const gaugePercent = Math.max(Math.min(discountToFairValue * 100, 60), -40);
   const gaugeWidth = ((gaugePercent + 40) / 100) * 100;
 
   return (
@@ -52,10 +60,10 @@ export function ExecutiveSummary({ asset, valuation }: Props) {
           </div>
           <div className="text-right">
             <p className="text-xs uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-              Juste Valeur Finale
+              Juste Valeur (médiane)
             </p>
-            <p className="text-2xl font-bold font-mono" style={{ color }}>
-              ${finalFairValue.toFixed(2)}
+            <p className="text-2xl font-bold font-mono" style={{ color: band.color }}>
+              ${fairValue.toFixed(2)}
             </p>
           </div>
         </div>
@@ -64,17 +72,17 @@ export function ExecutiveSummary({ asset, valuation }: Props) {
       <div className="mt-6 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
-            Marge de Sécurité
+            Discount / Premium vs Fair Value
           </span>
           <div className="flex items-center gap-2">
-            <span className="font-mono font-bold text-lg" style={{ color }}>
-              {formatPercent(safetyMargin)}
+            <span className="font-mono font-bold text-lg" style={{ color: band.color }}>
+              {formatPercent(discountToFairValue)}
             </span>
             <span
               className="rounded-full px-2.5 py-0.5 text-xs font-medium"
-              style={{ background: `${color}20`, color }}
+              style={{ background: `${band.color}20`, color: band.color }}
             >
-              {label}
+              {band.label}
             </span>
           </div>
         </div>
@@ -109,7 +117,7 @@ export function ExecutiveSummary({ asset, valuation }: Props) {
       >
         <MiniStat label="Market Cap" value={formatCurrency(asset.currentMetrics.marketCap)} />
         <MiniStat label="Beta" value={asset.currentMetrics.beta.toFixed(2)} />
-        <MiniStat label="WACC" value={formatPercent(valuation.waccBreakdown.wacc)} />
+        <MiniStat label="WACC (base)" value={formatPercent(evaluation.dcf.scenarios.base.wacc)} />
         <MiniStat label="Div. Yield" value={formatPercent(asset.currentMetrics.dividendYield)} />
       </div>
     </div>

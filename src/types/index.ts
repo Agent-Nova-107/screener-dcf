@@ -246,6 +246,158 @@ export const FullValuationResultSchema = z.object({
 export type FullValuationResult = z.infer<typeof FullValuationResultSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// NOUVEAU MOTEUR (v2) — CONTRATS DE SORTIE (MVP spec)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type DcfScenarioId = "bear" | "base" | "bull";
+
+export interface DcfScenarioResult {
+  scenario: DcfScenarioId;
+  params: DCFParameters;
+  wacc: number;
+  fairValuePerShare: number;
+  enterpriseValue: number;
+  equityValue: number;
+  netDebt: number;
+  projectedFCFs: { year: number; fcf: number; discountedFCF: number }[];
+  terminalValue: number;
+}
+
+export interface DcfScenarios {
+  applicable: boolean;
+  reasonIfNotApplicable?: string;
+  scenarios: Record<DcfScenarioId, DcfScenarioResult>;
+  discountToFairValueBase?: number; // (FV - Price) / FV
+}
+
+export interface DcfSensitivityCell3x3 {
+  wacc: number;
+  terminalGrowth: number;
+  fairValuePerShare: number;
+}
+
+export interface DcfSensitivityMatrix3x3 {
+  applicable: boolean;
+  reasonIfNotApplicable?: string;
+  // rows: wacc, cols: g
+  waccValues: number[];
+  terminalGrowthValues: number[];
+  matrix: DcfSensitivityCell3x3[][];
+}
+
+export type RelativeMultipleKey =
+  | "pe"
+  | "forwardPe"
+  | "peg"
+  | "evEbitda"
+  | "evEbit"
+  | "ps"
+  | "pFcf"
+  | "pb"
+  | "evSales";
+
+export interface RelativeMultipleResult {
+  key: RelativeMultipleKey;
+  label: string;
+  value: number | null;
+  // MVP: peers/percentiles non disponibles sans provider
+  sectorMedian: number | null;
+  premiumVsSectorMedianPct: number | null;
+  notes?: string;
+}
+
+export interface RelativeMultiplesSummary {
+  applicable: boolean;
+  multiples: RelativeMultipleResult[];
+  multiMethodUndervalued: boolean;
+  reasonIfNotApplicable?: string;
+}
+
+export type ValuationMethodId =
+  | "DCF"
+  | "MULTIPLES"
+  | "NAV"
+  | "DDM"
+  | "RIM";
+
+export interface ValuationMethodResult {
+  method: ValuationMethodId;
+  applicable: boolean;
+  fairValuePerShare: number | null;
+  low?: number | null;
+  high?: number | null;
+  notes?: string;
+}
+
+export type ConvergenceConviction = "HIGH" | "MEDIUM" | "LOW";
+
+export interface ValuationTriangulation {
+  methodsUsed: ValuationMethodResult[];
+  rangeMin: number | null;
+  rangeMax: number | null;
+  medianFairValue: number | null;
+  upsideDownsidePct: number | null; // (medianFV - price) / price
+  convergenceGapPct: number | null; // (max-min)/median
+  conviction: ConvergenceConviction;
+}
+
+export interface FeatureAvailability {
+  estimatesAndRevisions: boolean;
+  peersAndSectorPercentiles: boolean;
+}
+
+export interface FundamentalMomentumBadges {
+  operationalLeverageConfirmed?: boolean;
+  marginErosionWarning?: boolean;
+  highEarningsQuality?: boolean;
+  earningsQualityWarning?: boolean;
+  balanceSheetRisk?: boolean;
+}
+
+export interface FundamentalMomentumResult {
+  revenueGrowthYoY: number | null;
+  grossMarginBpsYoY: number | null;
+  ebitdaMarginBpsYoY: number | null;
+  ebitMarginBpsYoY: number | null;
+  netMarginBpsYoY: number | null;
+  fcfMarginBpsYoY: number | null;
+
+  accrualRatio: number | null;
+  cashConversionRate: number | null;
+
+  epsGrowthYoY: number | null;
+  fcfYield: number | null;
+  fcfGrowthYoY: number | null;
+
+  roic: number | null;
+  wacc: number | null;
+  roicMinusWacc: number | null;
+
+  netDebtToEbitda: number | null;
+  currentRatio: number | null;
+  interestCoverage: number | null;
+
+  badges: FundamentalMomentumBadges;
+}
+
+export interface CompositeMomentumScore {
+  score0to100: number | null;
+  partial: boolean;
+  notes?: string;
+}
+
+export interface StockEvaluationV2 {
+  features: FeatureAvailability;
+  currentPrice: number;
+  dcf: DcfScenarios;
+  dcfSensitivity: DcfSensitivityMatrix3x3;
+  multiples: RelativeMultiplesSummary;
+  triangulation: ValuationTriangulation;
+  momentum: FundamentalMomentumResult;
+  compositeMomentum: CompositeMomentumScore;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // RATIOS FONDAMENTAUX CALCULÉS
 // ─────────────────────────────────────────────────────────────────────────────
 

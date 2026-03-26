@@ -48,7 +48,9 @@ export async function fetchCompanyAsset(
   const upper = ticker.toUpperCase();
 
   const cached = getCached(upper);
-  if (cached) return { data: cached, source: "cache" };
+  if (cached) {
+    return { data: cached, source: "cache" };
+  }
 
   let profile = null;
   let incomeStmts = null;

@@ -22,7 +22,7 @@ export function CommandPalette() {
   const debouncedQuery = useDebounce(query, 300);
   const router = useRouter();
   const addToWatchlist = useAppStore((s) => s.addToWatchlist);
-  const isInWatchlist = useAppStore((s) => s.isInWatchlist);
+  const watchlist = useAppStore((s) => s.watchlist);
 
   useEffect(() => {
     if (!debouncedQuery.trim()) {
@@ -136,7 +136,7 @@ export function CommandPalette() {
           )}
 
           {results.map((c) => {
-            const inWL = isInWatchlist(c.ticker);
+            const inWL = watchlist.some((w) => w.ticker === c.ticker);
             return (
               <div
                 key={`${c.ticker}-${c.source}`}

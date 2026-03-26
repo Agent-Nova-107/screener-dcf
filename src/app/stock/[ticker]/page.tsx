@@ -1,10 +1,9 @@
 "use client";
 
 import { use, useState, useMemo, useCallback, useEffect } from "react";
-import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, Check, Loader2, AlertTriangle } from "lucide-react";
-import { computeFullValuation, computeFundamentalRatios, computeMomentum } from "@/lib/valuationEngine";
+import { computeStockEvaluationV2 } from "@/lib/valuationEngine";
 import type { FairValuePoint } from "@/types";
 import { useAppStore } from "@/store";
 import type { CompanyAsset, DCFParameters, MoatScore } from "@/types";
@@ -13,10 +12,10 @@ import { DCFSettings } from "@/components/stock/DCFSettings";
 import { DCFBreakdown } from "@/components/stock/DCFBreakdown";
 import { RelativeValuationCard } from "@/components/stock/RelativeValuationCard";
 import { SensitivityMatrix } from "@/components/stock/SensitivityMatrix";
-import { MetricAnalyzerPanel } from "@/components/stock/MetricAnalyzer";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { FinancialBars } from "@/components/charts/FinancialBars";
 import { MomentumPanel } from "@/components/stock/MomentumPanel";
+import { EstimatesRevisionsPanel } from "@/components/stock/EstimatesRevisionsPanel";
 import { useHydration } from "@/hooks/useHydration";
 
 export default function StockPage({
@@ -65,7 +64,9 @@ export default function StockPage({
   const storeMoat = useAppStore((s) => s.getMoatScore(upperTicker));
   const setStoreMoat = useAppStore((s) => s.setMoatScore);
   const addToWatchlist = useAppStore((s) => s.addToWatchlist);
-  const inWatchlist = hydrated ? useAppStore.getState().isInWatchlist(upperTicker) : false;
+  const watchlist = useAppStore((s) => s.watchlist);
+  const inWatchlist =
+    hydrated && watchlist.some((w) => w.ticker === upperTicker);
 
   const [dcfParams, setDcfParams] = useState<DCFParameters>(storeDCFParams);
   const [moat, setMoat] = useState<MoatScore>(storeMoat);
@@ -82,24 +83,14 @@ export default function StockPage({
     ? asset.incomeStatements.length > 0 && asset.balanceSheets.length > 0 && asset.cashFlowStatements.length > 0
     : false;
 
-  const valuation = useMemo(() => {
+  const evaluation = useMemo(() => {
     if (!asset || !hasFundamentals) return null;
-    return computeFullValuation(asset, dcfParams, moat);
+    return computeStockEvaluationV2(asset, dcfParams, moat);
   }, [asset, dcfParams, moat, hasFundamentals]);
 
-  const ratios = useMemo(() => {
-    if (!asset || !hasFundamentals) return null;
-    return computeFundamentalRatios(asset);
-  }, [asset, hasFundamentals]);
-
-  const momentum = useMemo(() => {
-    if (!asset || !hasFundamentals) return null;
-    return computeMomentum(asset);
-  }, [asset, hasFundamentals]);
-
   const fairValueHistory = useMemo((): FairValuePoint[] => {
-    if (!valuation || !asset || asset.priceHistory.length === 0) return [];
-    const fv = valuation.finalFairValue;
+    if (!evaluation || !asset || asset.priceHistory.length === 0) return [];
+    const fv = evaluation.triangulation.medianFairValue ?? evaluation.dcf.scenarios.base.fairValuePerShare;
     if (fv <= 0) return [];
     const prices = asset.priceHistory;
     const first = prices[0].time;
@@ -134,8 +125,6 @@ export default function StockPage({
       </div>
     );
   }
-
-  const latestRatios = ratios ? ratios[ratios.length - 1] : null;
 
   return (
     <div className="space-y-6">
@@ -179,8 +168,8 @@ export default function StockPage({
         </div>
       </div>
 
-      {valuation ? (
-        <ExecutiveSummary asset={asset} valuation={valuation} />
+      {evaluation ? (
+        <ExecutiveSummary asset={asset} evaluation={evaluation} />
       ) : (
         <div className="card p-6">
           <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
@@ -217,7 +206,7 @@ export default function StockPage({
         />
       )}
 
-      {hasFundamentals && valuation && (
+      {hasFundamentals && evaluation && (
         <>
           <DCFSettings
             params={dcfParams}
@@ -227,27 +216,20 @@ export default function StockPage({
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <DCFBreakdown dcf={valuation.dcf} wacc={valuation.waccBreakdown} />
+            <DCFBreakdown dcf={evaluation.dcf} currentPrice={asset.profile.currentPrice} />
             <div className="space-y-6">
-              <RelativeValuationCard
-                valuation={valuation.relativeValuation}
-                currentPrice={asset.profile.currentPrice}
-              />
-              {latestRatios && (
-                <MetricAnalyzerPanel
-                  ratios={latestRatios}
-                  incomeStatements={asset.incomeStatements}
-                />
-              )}
+              <RelativeValuationCard multiples={evaluation.multiples} currentPrice={asset.profile.currentPrice} />
             </div>
           </div>
 
-          {momentum && <MomentumPanel momentum={momentum} />}
+          <MomentumPanel momentum={evaluation.momentum} composite={evaluation.compositeMomentum} />
 
           <FinancialBars asset={asset} />
 
+          <EstimatesRevisionsPanel features={evaluation.features} />
+
           <SensitivityMatrix
-            matrix={valuation.sensitivityMatrix}
+            matrix={evaluation.dcfSensitivity}
             currentPrice={asset.profile.currentPrice}
           />
         </>

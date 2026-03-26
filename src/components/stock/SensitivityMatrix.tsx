@@ -1,17 +1,29 @@
 "use client";
 
-import type { SensitivityCell } from "@/types";
+import type { DcfSensitivityMatrix3x3 } from "@/types";
 import { formatPercent } from "@/lib/valuationEngine";
 
 interface Props {
-  matrix: SensitivityCell[][];
+  matrix: DcfSensitivityMatrix3x3;
   currentPrice: number;
 }
 
 export function SensitivityMatrix({ matrix, currentPrice }: Props) {
-  if (matrix.length === 0) return null;
+  if (!matrix.applicable) {
+    return (
+      <div className="card p-5 space-y-2">
+        <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>
+          Matrice de Sensibilité (3×3)
+        </h3>
+        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+          Non disponible: {matrix.reasonIfNotApplicable ?? "DCF non applicable"}.
+        </p>
+      </div>
+    );
+  }
+  if (matrix.matrix.length === 0) return null;
 
-  const growthSteps = matrix[0].map((c) => c.terminalGrowth);
+  const growthSteps = matrix.terminalGrowthValues;
 
   function cellColor(fairValue: number): string {
     const margin = (fairValue - currentPrice) / fairValue;
@@ -51,7 +63,7 @@ export function SensitivityMatrix({ matrix, currentPrice }: Props) {
             </tr>
           </thead>
           <tbody>
-            {matrix.map((row, ri) => (
+            {matrix.matrix.map((row, ri) => (
               <tr key={ri} style={{ borderTop: "1px solid var(--border)" }}>
                 <td
                   className="px-3 py-2 font-semibold"
@@ -63,9 +75,9 @@ export function SensitivityMatrix({ matrix, currentPrice }: Props) {
                   <td
                     key={ci}
                     className="px-3 py-2 text-center font-semibold"
-                    style={{ color: cellColor(cell.fairValue) }}
+                    style={{ color: cellColor(cell.fairValuePerShare) }}
                   >
-                    {cell.fairValue.toFixed(1)}
+                    {cell.fairValuePerShare.toFixed(1)}
                   </td>
                 ))}
               </tr>
