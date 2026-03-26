@@ -612,6 +612,34 @@ function median(values: number[]): number | null {
   return nums.length % 2 === 1 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
 }
 
+type MarketCapBucket = "MEGA" | "LARGE" | "MID" | "SMALL" | "MICRO";
+
+function marketCapBucket(marketCap: number): MarketCapBucket {
+  if (!Number.isFinite(marketCap) || marketCap <= 0) return "MID";
+  if (marketCap >= 200e9) return "MEGA";
+  if (marketCap >= 10e9) return "LARGE";
+  if (marketCap >= 2e9) return "MID";
+  if (marketCap >= 300e6) return "SMALL";
+  return "MICRO";
+}
+
+function equityRiskPremiumForMarketCap(marketCap: number): number {
+  // Option 1 buckets (universel). Heuristique: ERP plus bas pour mega caps.
+  const bucket = marketCapBucket(marketCap);
+  switch (bucket) {
+    case "MEGA":
+      return 0.05;
+    case "LARGE":
+      return 0.055;
+    case "MID":
+      return 0.065;
+    case "SMALL":
+      return 0.075;
+    case "MICRO":
+      return 0.085;
+  }
+}
+
 export function isDcfApplicable(asset: CompanyAsset): { ok: boolean; reason?: string } {
   const cfs = asset.cashFlowStatements;
   if (!cfs || cfs.length < 2) return { ok: false, reason: "Historique FCF insuffisant" };
@@ -1021,11 +1049,16 @@ export function computeStockEvaluationV2(
     peersAndSectorPercentiles: false,
   };
 
-  const dcf = computeDCFScenarios(asset, params);
-  const dcfSensitivity = computeDcfSensitivity3x3(asset, params);
+  const sizedParams: DCFParameters = {
+    ...params,
+    equityRiskPremium: equityRiskPremiumForMarketCap(asset.currentMetrics.marketCap),
+  };
+
+  const dcf = computeDCFScenarios(asset, sizedParams);
+  const dcfSensitivity = computeDcfSensitivity3x3(asset, sizedParams);
   const multiples = computeRelativeMultiples(asset);
 
-  const wacc = computeWACC(asset, params).wacc;
+  const wacc = computeWACC(asset, sizedParams).wacc;
   const momentum = computeFundamentalMomentumV2(asset, wacc);
   const compositeMomentum = computeCompositeMomentumScoreV2(momentum);
 
