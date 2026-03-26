@@ -6,9 +6,8 @@ import { ArrowLeft, Plus, Check, Loader2, AlertTriangle } from "lucide-react";
 import { computeStockEvaluationV2 } from "@/lib/valuationEngine";
 import type { FairValuePoint } from "@/types";
 import { useAppStore } from "@/store";
-import type { CompanyAsset, DCFParameters, MoatScore } from "@/types";
+import type { CompanyAsset, MoatScore } from "@/types";
 import { ExecutiveSummary } from "@/components/stock/ExecutiveSummary";
-import { DCFSettings } from "@/components/stock/DCFSettings";
 import { DCFBreakdown } from "@/components/stock/DCFBreakdown";
 import { RelativeValuationCard } from "@/components/stock/RelativeValuationCard";
 import { SensitivityMatrix } from "@/components/stock/SensitivityMatrix";
@@ -68,7 +67,6 @@ export default function StockPage({
   const inWatchlist =
     hydrated && watchlist.some((w) => w.ticker === upperTicker);
 
-  const [dcfParams, setDcfParams] = useState<DCFParameters>(storeDCFParams);
   const [moat, setMoat] = useState<MoatScore>(storeMoat);
 
   const handleMoatChange = useCallback(
@@ -85,8 +83,8 @@ export default function StockPage({
 
   const evaluation = useMemo(() => {
     if (!asset || !hasFundamentals) return null;
-    return computeStockEvaluationV2(asset, dcfParams, moat);
-  }, [asset, dcfParams, moat, hasFundamentals]);
+    return computeStockEvaluationV2(asset, storeDCFParams, moat);
+  }, [asset, storeDCFParams, moat, hasFundamentals]);
 
   const fairValueHistory = useMemo((): FairValuePoint[] => {
     if (!evaluation || !asset || asset.priceHistory.length === 0) return [];
@@ -208,13 +206,6 @@ export default function StockPage({
 
       {hasFundamentals && evaluation && (
         <>
-          <DCFSettings
-            params={dcfParams}
-            moat={moat}
-            onParamsChange={setDcfParams}
-            onMoatChange={handleMoatChange}
-          />
-
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <DCFBreakdown dcf={evaluation.dcf} currentPrice={asset.profile.currentPrice} />
             <div className="space-y-6">
