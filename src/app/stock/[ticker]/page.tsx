@@ -99,7 +99,7 @@ export default function StockPage({
       { time: first, value: fv },
       { time: last, value: fv },
     ];
-  }, [valuation, asset]);
+  }, [evaluation, asset]);
 
   if (loading) {
     return (
